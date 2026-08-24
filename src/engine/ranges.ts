@@ -608,20 +608,40 @@ export interface SeatPosition {
 }
 
 /**
+ * Chart position by number of players left to act behind hero.
+ *
+ * This is the whole seat mapping: a seat's correct chart is decided by how many
+ * players act after it, not by the size of the table. A seat with three players
+ * behind plays the cutoff chart whether the table is 4-handed or 10-handed,
+ * which is what published 6-max and full-ring charts actually show.
+ *
+ * Beyond five players behind there is no 6-max chart to map onto, so the seat
+ * uses the UTG chart and `tableScaling.ts` tightens it. See that file for the
+ * width rule and its validation against published full-ring ranges.
+ */
+const CHART_BY_PLAYERS_BEHIND: readonly ChartPosition[] = [
+  'BB',  // 0 behind — closes the preflop action
+  'SB',  // 1
+  'BTN', // 2
+  'CO',  // 3
+  'MP',  // 4
+  'UTG', // 5 and above
+];
+
+/**
  * Maps an N-handed table onto the 6-max chart positions.
  *
- * Rules, applied in order:
- *   - the last three seats are always BTN, SB, BB (BB acts last preflop);
- *   - the seat before the button is CO;
- *   - the remaining early seats split as evenly as possible into UTG and MP,
- *     with the extra seat going to UTG when the count is odd;
- *   - heads-up (2 players) is BTN and BB, since the button posts the small
- *     blind and uses button ranges;
- *   - 1 player is hero alone (pure equity drilling, no opponents) and is
- *     nominally labelled BTN.
+ * Seats are assigned by players-left-to-act (see `CHART_BY_PLAYERS_BEHIND`), so
+ * the blinds, button and cutoff land correctly at every table size and only the
+ * early seats pile up on the UTG chart. Two special cases:
  *
- * Display labels disambiguate duplicated chart positions as UTG, UTG+1, UTG+2
- * and MP, MP+1, MP+2, so a 9-handed table still reads correctly on screen.
+ *   - 2 players is heads-up: the button posts the small blind and plays button
+ *     ranges, so the seats are BTN and BB rather than SB and BB. Heads-up uses
+ *     its own authored charts entirely (see `headsUp` in ranges.json).
+ *   - 1 player is hero alone for pure equity drilling, nominally the button.
+ *
+ * Display labels disambiguate seats sharing a chart as UTG, UTG+1, UTG+2 and so
+ * on, earliest seat first, so a 9-handed table still reads correctly on screen.
  */
 export function seatPositions(playerCount: number): SeatPosition[] {
   if (!Number.isInteger(playerCount) || playerCount < 1 || playerCount > 10) {
@@ -638,19 +658,24 @@ export function seatPositions(playerCount: number): SeatPosition[] {
   }
 
   const charts: ChartPosition[] = [];
-  const earlyCount = Math.max(0, playerCount - 4); // everything before CO/BTN/SB/BB
-  const utgCount = Math.ceil(earlyCount / 2);
-  for (let i = 0; i < utgCount; i++) charts.push('UTG');
-  for (let i = 0; i < earlyCount - utgCount; i++) charts.push('MP');
-  if (playerCount >= 4) charts.push('CO');
-  charts.push('BTN', 'SB', 'BB');
+  for (let seatIndex = 0; seatIndex < playerCount; seatIndex++) {
+    const behind = playerCount - 1 - seatIndex;
+    const chart = behind >= CHART_BY_PLAYERS_BEHIND.length
+      ? 'UTG'
+      : (CHART_BY_PLAYERS_BEHIND[behind] as ChartPosition);
+    charts.push(chart);
+  }
 
   const counters = new Map<ChartPosition, number>();
+  const totals = new Map<ChartPosition, number>();
+  for (const chart of charts) totals.set(chart, (totals.get(chart) ?? 0) + 1);
+
   return charts.map((chart, seatIndex) => {
     const seen = counters.get(chart) ?? 0;
     counters.set(chart, seen + 1);
-    const totalOfChart = charts.filter((c) => c === chart).length;
-    const display = totalOfChart > 1 ? `${chart}+${seen}`.replace('+0', '') : chart;
+    const display = (totals.get(chart) as number) > 1 && seen > 0
+      ? `${chart}+${seen}`
+      : chart;
     return { seatIndex, display, chart };
   });
 }
@@ -687,12 +712,19 @@ export interface ResponseSpec {
   readonly squeeze?: RangeSpec;
 }
 
+export interface HeadsUpJson {
+  readonly rfi: Partial<Record<ChartPosition, RangeSpec>>;
+  readonly vsOpen: Partial<Record<ChartPosition, ResponseSpec>>;
+}
+
 export interface RangeChartsJson {
   readonly meta?: unknown;
   readonly rfi: Partial<Record<ChartPosition, RangeSpec>>;
   readonly vsOpen: Partial<Record<ChartPosition, Partial<Record<OpenerBucket, ResponseSpec>>>>;
   readonly vsOpenWithCallers: Partial<Record<ChartPosition, ResponseSpec>>;
   readonly vsThreeBet: Partial<Record<ChartPosition | 'default', ResponseSpec>>;
+  /** Heads-up charts, used verbatim at 2 players. See `headsUp` in ranges.json. */
+  readonly headsUp?: HeadsUpJson;
 }
 
 export interface ParsedResponse {
@@ -719,6 +751,32 @@ export class RangeCharts {
       this.vsOpenWithCallers(position);
       this.vsThreeBet(position);
     }
+    this.headsUpRfi();
+    this.headsUpVsOpen();
+  }
+
+  /** True when the JSON supplies dedicated heads-up charts. */
+  get hasHeadsUpCharts(): boolean {
+    return this.json.headsUp !== undefined;
+  }
+
+  /** The button's heads-up opening range. Empty when no heads-up charts exist. */
+  headsUpRfi(): Range {
+    const cached = this.rfiCache.get('__hu_btn__' as ChartPosition);
+    if (cached) return cached;
+    const spec = this.json.headsUp?.rfi?.BTN;
+    const range = spec === undefined
+      ? Range.empty('HU BTN RFI')
+      : Range.parse(spec, 'HU BTN RFI');
+    this.rfiCache.set('__hu_btn__' as ChartPosition, range);
+    return range;
+  }
+
+  /** The big blind's heads-up defence against a button open. */
+  headsUpVsOpen(): ParsedResponse {
+    return this.cachedResponse('hu:BB', () =>
+      this.parseResponse(this.json.headsUp?.vsOpen?.BB, 'HU BB vs BTN open'),
+    );
   }
 
   /** Raise-first-in range for a position. The BB has none (it never opens). */

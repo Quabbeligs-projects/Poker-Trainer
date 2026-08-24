@@ -277,21 +277,25 @@ describe('table-size to 6-max seat mapping', () => {
     expect(seatPositions(1).map((s) => s.chart)).toEqual(['BTN']);
   });
 
-  it('splits extra early seats into UTG then MP, extra seat to UTG', () => {
+  it('assigns charts by players behind, piling extra early seats onto UTG', () => {
+    // Seats are mapped by how many players act after them, so BB/SB/BTN/CO/MP
+    // land on their own charts at every table size and only the seats with more
+    // than five players behind share the UTG chart. tableScaling.ts then
+    // tightens those by how far past five they are.
     expect(seatPositions(7).map((s) => s.chart)).toEqual(
       ['UTG', 'UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'],
     );
     expect(seatPositions(9).map((s) => s.chart)).toEqual(
-      ['UTG', 'UTG', 'UTG', 'MP', 'MP', 'CO', 'BTN', 'SB', 'BB'],
+      ['UTG', 'UTG', 'UTG', 'UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'],
     );
     expect(seatPositions(10).map((s) => s.chart)).toEqual(
-      ['UTG', 'UTG', 'UTG', 'MP', 'MP', 'MP', 'CO', 'BTN', 'SB', 'BB'],
+      ['UTG', 'UTG', 'UTG', 'UTG', 'UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'],
     );
   });
 
   it('gives duplicated chart positions distinct display labels', () => {
     expect(seatPositions(9).map((s) => s.display)).toEqual(
-      ['UTG', 'UTG+1', 'UTG+2', 'MP', 'MP+1', 'CO', 'BTN', 'SB', 'BB'],
+      ['UTG', 'UTG+1', 'UTG+2', 'UTG+3', 'MP', 'CO', 'BTN', 'SB', 'BB'],
     );
   });
 

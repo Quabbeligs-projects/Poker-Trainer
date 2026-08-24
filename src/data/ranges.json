@@ -41,6 +41,13 @@
   },
 
   "vsOpen": {
+    "_comment": "The UTG entry only applies at 7+ handed tables, where a seat using the UTG chart can still face an open from an even earlier seat. It cannot occur at 6-max, where UTG acts first.",
+    "UTG": {
+      "early": {
+        "call": ["77-JJ", "AQs", "AJs", "KQs", "JTs"],
+        "threeBet": ["QQ+", "AKs", "AKo", "AJs", "A5s"]
+      }
+    },
     "MP": {
       "early": {
         "call": ["55-JJ", "AJs", "ATs", "KQs", "KJs", "QJs", "JTs", "T9s", "98s", "AQo"],
@@ -125,6 +132,31 @@
     "BB": {
       "call": ["22-JJ", "AJs-A2s", "KTs+", "Q9s+", "J9s+", "T8s+", "97s+", "86s+", "76s", "65s", "54s", "AQo", "AJo", "KQo", "QJo"],
       "squeeze": ["QQ+", "AKs", "AKo", "AQs", "AJs", "A5s", "A4s", "A3s", "KQs"]
+    }
+  },
+
+  "headsUp": {
+    "_comment": "Heads-up is NOT a scaled 6-max chart. The button posts the small blind, is in position postflop, and faces one opponent, so no width-scaling rule applied to a 6-max chart reproduces it. These are authored separately and used verbatim whenever playerCount === 2.",
+    "rfi": {
+      "BTN": [
+        "22+",
+        "A2s+", "K2s+", "Q2s+", "J2s+", "T2s+", "92s+", "82s+", "72s+", "62s+", "52s+", "42s+", "32s",
+        "A2o+", "K2o+", "Q2o+", "J2o+", "T3o+", "95o+", "85o+", "75o+", "64o+", "54o"
+      ]
+    },
+    "vsOpen": {
+      "BB": {
+        "call": [
+          "22-JJ",
+          "A9s-A2s", "K2s+", "Q2s+", "J2s+", "T4s+", "94s+", "84s+", "74s+", "64s+", "53s+", "43s",
+          "A9o-A2o", "K2o+", "Q5o+", "J7o+", "T7o+", "97o+", "87o", "76o", "65o"
+        ],
+        "threeBet": [
+          "QQ+", "AKs", "AKo", "AQs", "AQo", "AJs", "AJo", "ATs", "ATo",
+          "A5s", "A4s", "A3s", "A2s",
+          "KQs", "KQo", "KJs", "KTs", "QJs", "QTs", "JTs", "T9s", "98s", "87s", "76s", "65s"
+        ]
+      }
     }
   },
 

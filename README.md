@@ -5,9 +5,12 @@ action selection. No network calls, no API keys, no LLM — every "correct answe
 is computed deterministically from a seeded RNG, so a wrong training signal can
 only come from a bug, never from a model's guess.
 
-**Status: engine steps 1–2 complete** (deck, evaluator, ranges, Monte Carlo
-equity, pot odds). Paused here as requested, for benchmark review before
-building range narrowing, the action solver, game modes and UI on top.
+**Status: engine steps 1–3 complete** (deck, evaluator, ranges, Monte Carlo
+equity, pot odds, table-size scaling, range narrowing, action solver).
+212 tests passing. Game modes and UI next.
+
+Tagged `engine-v1-validated` at commit `83db7ec` — the validated evaluator +
+equity layer, before narrowing was built on top.
 
 ## Layout
 
@@ -25,7 +28,8 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test          # 126 tests, ~12s
+npm test          # 212 tests, ~18s
+npm run grids     # render every chart as a 13x13 grid -> range-grids.html
 npm run dev       # (once UI exists)
 npm run build
 ```
@@ -83,17 +87,111 @@ the **high** card and walks the low one up, so `AJs+` is `AJs, AQs, AKs` and
 `76s+` is just `76s`. Runs of connectors must be written as an explicit diagonal
 (`T9s-54s`), which removes the ambiguity that bites people writing `65s+`.
 
-Charts are 6-max. For other table sizes: the last three seats are always
-BTN/SB/BB, the seat before the button is CO, and remaining early seats split
-into UTG then MP with the extra seat going to UTG. Heads-up is BTN vs BB.
-Duplicated chart positions get distinct display labels (`UTG`, `UTG+1`, `UTG+2`).
+Review the charts visually with `npm run grids`, which renders every chart as a
+13×13 grid in a self-contained HTML page.
 
-Current chart coverage:
+Current 6-max coverage:
 
 ```
 RFI  UTG  14.3%   MP  18.9%   CO  25.5%   BTN  41.8%   SB  36.7%
 BB defends vs BTN open: 40.3% call + 10.0% 3-bet
 ```
+
+### Table-size scaling — one rule, not two chart sets
+
+Mapping seat names onto a 9-handed table is not enough: UTG 9-handed has eight
+players behind against five 6-handed, so range *width* has to tighten too.
+
+The key point is that width is driven by **players left to act behind hero**,
+not table size. A cutoff has three players behind at any table size, which is
+why published 6-max and full-ring cutoff ranges are near-identical. The same
+holds for the button and the blinds. Only the early seats differ, and they
+differ precisely because they have more players behind. So seats are mapped by
+players-behind, and beyond five behind — where no 6-max chart exists — the UTG
+chart is tightened by **0.90 per extra player**.
+
+This reproduces published full-ring ranges within ~1.2pp:
+
+```
+seat (9-handed)   behind   this rule   published
+UTG                  8       10.4%      ~10.5%
+UTG+1                7       11.6%       ~12%
+UTG+2                6       12.9%      ~13.5%
+UTG+3                5       14.3%       ~15%
+MP                   4       18.9%       ~19%
+CO                   3       25.5%       ~25%
+BTN                  2       41.8%       ~43%
+```
+
+Chosen over separate 6-max/full-ring chart sets because it leaves exactly **one**
+hand-authored chart set to review — authored chart data is the part of this
+engine no test can prove correct, only self-consistent, so halving it is a real
+reduction in risk. It also covers the 7-, 8- and 10-handed cases no published
+chart set covers, applies uniformly to calling and 3-betting ranges, and is
+falsifiable against the table above.
+
+When tightening, weakest hands go first, ordered by **chart tier** (the tightest
+opening chart containing the hand — derived from the charts themselves) and then
+by equity against a random hand, used only to break ties within a tier. Tier
+dominates deliberately: equity-vs-random ranks K2s above 76s, whereas the charts
+prefer 76s, and tier ordering keeps 76s longer. The boundary hand is trimmed
+**fractionally** so a target width is hit exactly.
+
+Two documented exceptions:
+
+- **Heads-up is authored separately, never scaled.** The button has one player
+  behind — fewer than the 6-max button — so the rule would want to *widen*, and
+  no widening of a 41.8% chart produces a correct ~85% heads-up button range.
+  HU is a structurally different game and gets its own charts (BTN opens 84.6%,
+  BB defends 68.9%).
+- **The small blind is tighter than the button** despite fewer players behind,
+  because it is out of position postflop against a blind that never folds for
+  free. Any monotonic-in-players-behind rule must exclude the blinds.
+
+### Range narrowing
+
+`rangeNarrowing.ts` holds every tunable weight in one `NARROWING_RULES` object,
+one block per action, each with a comment. Every rule is tagged `[DERIVED]`
+(follows from the game or from arithmetic — changing it makes the engine wrong)
+or `[JUDGEMENT]` (a modelling opinion about how a typical opponent plays — yours
+to tune). Most of it is `[JUDGEMENT]`, unavoidably: there is no deterministic
+truth about what a check means.
+
+Hand classification *is* derived — it comes from the evaluator and from counting
+outs. Note the taxonomy: `strong` is two pair or a set, `monster` starts at a
+straight.
+
+A range is never narrowed to nothing: below `MIN_SURVIVING_COMBOS` (12) or
+`MIN_SURVIVING_WEIGHT` (8) the narrowing is blended back toward the pre-action
+range, and `MAX_NARROWING_PER_STREET` (0.25) stops one action removing more than
+three quarters of a range.
+
+Fold frequency is keyed on the **pot odds the opponent is laid**, not on the raw
+size of hero's wager. This matters for raises: a raise to 183 when the opponent
+has already bet 50 asks them to call only 133 into 333 — a cheap price — even
+though 183 looks like an overbet next to the pot. Pricing that as an overbet
+made every raise look enormously profitable, which is a bug this caught.
+
+Fold frequency is a **step function** of price, since continue thresholds are
+class buckets: sizings inside one band fold out identical hands, and two bands
+coincide when the class between them is empty on that board. Documented rather
+than hidden.
+
+### Action solver
+
+Every action gets an EV in chips against folding = 0, from explicit pot
+arithmetic written out in the file header — no heuristic scores. Bet and raise
+EV uses equity against the range that **continues**, not the whole range, since
+the folding hands are exactly the ones hero already beats.
+
+Simplifications, stated plainly: one street at a time (no implied odds, no
+multi-street planning), one bet size fixed at 2/3 pot per the spec, and multiway
+pots resolve as a simple showdown.
+
+An action is correct when its EV is within 5% of the best, with an absolute
+floor of 1% of the pot so grading is not knife-edge when the best EV is near
+zero. Note that a *profitable* call is not necessarily a *correct* one: with real
+fold equity available, raising can outrank a call that still shows positive EV.
 
 ### Equity
 
@@ -157,7 +255,6 @@ iPhone measurement says otherwise, `equity.ts` moves into a Web Worker unchanged
 
 ## Still to build
 
-3. Range narrowing + action solver
 4. Game state machines (Outs, Preflop)
 5. UI (dark theme, four-colour deck, oval table)
 6. Stats, review mode, PWA packaging

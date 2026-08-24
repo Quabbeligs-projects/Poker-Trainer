@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench": "vitest run --testNamePattern=benchmark"
+    "bench": "vitest run --testNamePattern=benchmark",
+    "grids": "vite-node scripts/renderRangeGrids.mjs",
+    "generate:handstrength": "vite-node scripts/generateHandStrength.mjs"
   },
   "dependencies": {
     "phe": "^0.6.0",
