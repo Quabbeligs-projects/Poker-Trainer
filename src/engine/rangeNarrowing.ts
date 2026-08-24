@@ -212,6 +212,35 @@ function makesStraight(present: ReadonlySet<number>, rank: number): boolean {
 /* THE RULES — everything tunable lives here                                  */
 /* ========================================================================== */
 
+/**
+ * Reference bet size, as a fraction of the pot. A bet of exactly this size
+ * applies the multipliers below at face value.
+ */
+export const REFERENCE_BET_FRACTION = 2 / 3;
+
+/** Intensity is clamped to this band, so no sizing can erase or invert a rule. */
+export const MIN_INTENSITY = 0.45;
+export const MAX_INTENSITY = 2.2;
+
+/**
+ * How hard to apply the multipliers, given the size of the bet involved.
+ *
+ * [JUDGEMENT] A pot-sized bet says far more about a range than a quarter-pot
+ * stab does, and treating them identically was a real defect: it gave a gutshot
+ * facing a pot-sized bet the same read as one facing a min-bet, and inflated
+ * hero's equity against every large bet.
+ *
+ * Intensity `k` is applied as `multiplier ** k`, which is the right shape for
+ * this: it preserves direction (a promotion stays a promotion, a demotion stays
+ * a demotion), leaves a neutral 1.0 neutral, and intensifies smoothly. At the
+ * reference size `k` is 1 and the multipliers apply exactly as written.
+ */
+export function narrowingIntensity(betFraction: number): number {
+  if (!Number.isFinite(betFraction) || betFraction <= 0) return 1;
+  const raw = betFraction / REFERENCE_BET_FRACTION;
+  return Math.max(MIN_INTENSITY, Math.min(MAX_INTENSITY, raw));
+}
+
 /** A multiplier per made-hand class. Missing entries default to 1.0. */
 export type ClassWeights = Partial<Record<MadeClass, number>>;
 
@@ -275,11 +304,11 @@ export const NARROWING_RULES: Readonly<Record<PostflopAction, NarrowingRule>> = 
       monster: 0.25,
       strong: 0.5,
       overpair: 0.9,
-      topPair: 1.3,
-      weakPair: 1.4,
+      topPair: 1.35,
+      weakPair: 1.45,
       strongDraw: 1.5,
-      weakDraw: 1.0,
-      nothing: 0.25,
+      weakDraw: 0.9,
+      nothing: 0.18,
     },
   },
 
@@ -294,14 +323,14 @@ export const NARROWING_RULES: Readonly<Record<PostflopAction, NarrowingRule>> = 
   checkRaise: {
     label: 'check-raised — polarised to strong hands and semi-bluffs',
     weights: {
-      monster: 3.0,
-      strong: 2.6,
-      overpair: 1.4,
-      topPair: 0.7,
-      weakPair: 0.25,
-      strongDraw: 1.6,
-      weakDraw: 0.5,
-      nothing: 0.35,
+      monster: 4.5,
+      strong: 3.5,
+      overpair: 1.5,
+      topPair: 0.55,
+      weakPair: 0.12,
+      strongDraw: 1.8,
+      weakDraw: 0.25,
+      nothing: 0.2,
     },
   },
 
@@ -315,14 +344,14 @@ export const NARROWING_RULES: Readonly<Record<PostflopAction, NarrowingRule>> = 
   bet: {
     label: 'bet — value hands and semi-bluffs, fewer showdown-bound hands',
     weights: {
-      monster: 1.6,
-      strong: 1.6,
-      overpair: 1.5,
-      topPair: 1.4,
-      weakPair: 0.7,
-      strongDraw: 1.4,
-      weakDraw: 0.9,
-      nothing: 0.8,
+      monster: 1.9,
+      strong: 1.9,
+      overpair: 1.7,
+      topPair: 1.5,
+      weakPair: 0.65,
+      strongDraw: 1.5,
+      weakDraw: 0.85,
+      nothing: 0.42,
     },
   },
 
@@ -335,14 +364,14 @@ export const NARROWING_RULES: Readonly<Record<PostflopAction, NarrowingRule>> = 
   raise: {
     label: 'raised — strong made hands and semi-bluffs',
     weights: {
-      monster: 2.8,
-      strong: 2.4,
-      overpair: 1.5,
-      topPair: 0.8,
-      weakPair: 0.3,
-      strongDraw: 1.5,
-      weakDraw: 0.5,
-      nothing: 0.4,
+      monster: 4.0,
+      strong: 3.2,
+      overpair: 1.6,
+      topPair: 0.6,
+      weakPair: 0.15,
+      strongDraw: 1.7,
+      weakDraw: 0.3,
+      nothing: 0.22,
     },
   },
 
@@ -358,11 +387,11 @@ export const NARROWING_RULES: Readonly<Record<PostflopAction, NarrowingRule>> = 
       monster: 0.35,
       strong: 0.6,
       overpair: 1.0,
-      topPair: 1.3,
-      weakPair: 1.3,
-      strongDraw: 1.45,
-      weakDraw: 1.0,
-      nothing: 0.3,
+      topPair: 1.4,
+      weakPair: 1.35,
+      strongDraw: 1.5,
+      weakDraw: 0.9,
+      nothing: 0.2,
     },
   },
 });
@@ -388,11 +417,15 @@ export const MIN_SURVIVING_WEIGHT = 8;
  * How far a range may be narrowed in one street, as a fraction of its
  * pre-action total weight.
  *
- * [JUDGEMENT] Without this, three streets of aggressive multipliers can
- * compound into an absurdly narrow range. 0.25 means a single action can never
- * remove more than three quarters of an opponent's range.
+ * [JUDGEMENT] A BACKSTOP against a compounding absurdity, not a routine
+ * constraint. It was originally 0.25, which turned out to fire on almost every
+ * polarised action and blend the narrowing back toward the unnarrowed range —
+ * diluting exactly the reads it was meant to protect. Since weights are
+ * rescaled so the strongest combo sits at 1.0, a genuinely polarising action
+ * legitimately drops total weight a long way, and that is not over-narrowing.
+ * Lowered to 0.08 so it only catches the pathological case.
  */
-export const MAX_NARROWING_PER_STREET = 0.25;
+export const MAX_NARROWING_PER_STREET = 0.08;
 
 /* ========================================================================== */
 /* Applying the rules                                                         */
@@ -410,6 +443,8 @@ export interface NarrowingStep {
   readonly weightAfter: number;
   /** True when the floor or the per-street cap had to intervene. */
   readonly floorApplied: boolean;
+  /** The bet-size intensity this step was applied at. */
+  readonly intensity: number;
 }
 
 export interface NarrowingResult {
@@ -423,12 +458,24 @@ export interface NarrowingResult {
  * Card removal is applied first: a combo containing a board card cannot be
  * held. [DERIVED]
  */
+export interface ActionContext {
+  /**
+   * Size of the bet involved, as a fraction of the pot before it. For an
+   * aggressive action this is hero's opponent's own sizing; for a call or a
+   * check-call it is the size of the bet they faced. Defaults to the reference
+   * size, which applies the multipliers exactly as written.
+   */
+  readonly betFraction?: number;
+}
+
 export function applyAction(
   range: Range,
   action: PostflopAction,
   board: readonly CardCode[],
+  context: ActionContext = {},
 ): { range: Range; step: NarrowingStep } {
   const rule = NARROWING_RULES[action];
+  const intensity = narrowingIntensity(context.betFraction ?? REFERENCE_BET_FRACTION);
   const available = range.removeCards(board);
 
   const weightBefore = available.totalWeight;
@@ -442,7 +489,8 @@ export function applyAction(
     const madeClass = classified[index] as MadeClass | undefined;
     if (madeClass === undefined) return weight;
     const multiplier = rule.weights[madeClass] ?? 1;
-    return weight * multiplier;
+    // `** intensity` scales how hard the rule bites with the size of the bet.
+    return weight * (multiplier === 1 ? 1 : multiplier ** intensity);
   }, available.label);
 
   // Multipliers above 1 can push weights past the [0,1] cap, which silently
@@ -481,6 +529,7 @@ export function applyAction(
       weightBefore,
       weightAfter: narrowed.totalWeight,
       floorApplied,
+      intensity,
     },
   };
 }
@@ -528,12 +577,17 @@ export function classifyRange(
  */
 export function narrowRange(
   startingRange: Range,
-  actions: ReadonlyArray<{ action: PostflopAction; board: readonly CardCode[] }>,
+  actions: ReadonlyArray<{
+    action: PostflopAction;
+    board: readonly CardCode[];
+    betFraction?: number;
+  }>,
 ): NarrowingResult {
   let range = startingRange;
   const steps: NarrowingStep[] = [];
-  for (const { action, board } of actions) {
-    const applied = applyAction(range, action, board);
+  for (const { action, board, betFraction } of actions) {
+    const applied = applyAction(range, action, board,
+      betFraction === undefined ? {} : { betFraction });
     range = applied.range;
     steps.push(applied.step);
   }

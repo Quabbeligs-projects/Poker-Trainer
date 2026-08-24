@@ -4,6 +4,10 @@ import rangesJson from '../src/data/ranges.json';
 import { RangeCharts, Range, type RangeChartsJson, comboHigh, comboLow } from '../src/engine/ranges';
 import { codesFromStrings } from '../src/engine/deck';
 import {
+  MAX_INTENSITY,
+  MIN_INTENSITY,
+  REFERENCE_BET_FRACTION,
+  narrowingIntensity,
   MADE_CLASSES,
   MAX_NARROWING_PER_STREET,
   MIN_SURVIVING_COMBOS,
@@ -180,6 +184,77 @@ describe('every documented rule does what its comment says', () => {
       return strong / total;
     };
     expect(strongShare(raised)).toBeGreaterThan(strongShare(checked));
+  });
+});
+
+describe('bet size changes how hard a rule bites', () => {
+  const board = C('Qd 8h 3c');
+  const base = charts.rfi('CO');
+
+  const airShare = (range: Range) => {
+    let air = 0;
+    let total = 0;
+    for (const index of range.nonZeroIndices) {
+      const weight = range.weightOf(index);
+      total += weight;
+      if (classifyCombo(comboHigh(index), comboLow(index), board).madeClass === 'nothing') {
+        air += weight;
+      }
+    }
+    return air / total;
+  };
+
+  it('is neutral at the reference size and clamps at the extremes', () => {
+    expect(narrowingIntensity(REFERENCE_BET_FRACTION)).toBeCloseTo(1, 9);
+    expect(narrowingIntensity(0.05)).toBe(MIN_INTENSITY);
+    expect(narrowingIntensity(10)).toBe(MAX_INTENSITY);
+    expect(narrowingIntensity(0)).toBe(1);
+    expect(narrowingIntensity(NaN)).toBe(1);
+  });
+
+  it('leaves a bigger bettor with less air than a small bettor', () => {
+    // Treating a quarter-pot stab and a pot-sized bet identically was a real
+    // defect: it gave a gutshot facing a pot bet the same read as a min-bet.
+    const small = applyAction(base, 'bet', board, { betFraction: 0.25 }).range;
+    const large = applyAction(base, 'bet', board, { betFraction: 1.0 }).range;
+    expect(airShare(large)).toBeLessThan(airShare(small));
+    expect(airShare(small)).toBeLessThan(airShare(base.removeCards(board)) + 1e-9);
+  });
+
+  it('never inverts a rule, however extreme the sizing', () => {
+    // A promotion must stay a promotion and a demotion a demotion at any size.
+    for (const betFraction of [0.05, 0.25, 0.5, 1, 2, 10]) {
+      const narrowed = applyAction(base, 'raise', board, { betFraction }).range;
+      const before = base.removeCards(board);
+      const shareOf = (range: Range, target: string) => {
+        let hit = 0;
+        let total = 0;
+        for (const index of range.nonZeroIndices) {
+          const weight = range.weightOf(index);
+          total += weight;
+          if (classifyCombo(comboHigh(index), comboLow(index), board).madeClass === target) {
+            hit += weight;
+          }
+        }
+        return hit / total;
+      };
+      expect(shareOf(narrowed, 'strong'), `bet ${betFraction}`)
+        .toBeGreaterThan(shareOf(before, 'strong'));
+      expect(shareOf(narrowed, 'nothing'), `bet ${betFraction}`)
+        .toBeLessThan(shareOf(before, 'nothing'));
+    }
+  });
+
+  it('defaults to the reference size when no sizing is supplied', () => {
+    const implicit = applyAction(base, 'bet', board).range;
+    const explicit = applyAction(base, 'bet', board,
+      { betFraction: REFERENCE_BET_FRACTION }).range;
+    expect(implicit.totalWeight).toBeCloseTo(explicit.totalWeight, 9);
+  });
+
+  it('records the intensity it used', () => {
+    const { step } = applyAction(base, 'bet', board, { betFraction: 1.0 });
+    expect(step.intensity).toBeCloseTo(1.0 / REFERENCE_BET_FRACTION, 9);
   });
 });
 

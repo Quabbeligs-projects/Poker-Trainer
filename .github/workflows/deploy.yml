@@ -1,0 +1,82 @@
+# Builds the trainer and publishes it to GitHub Pages.
+#
+# ONE-TIME SETUP REQUIRED (cannot be done from a workflow file):
+#   Repository Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# Until that is set, this workflow builds successfully but the deploy step fails
+# with "Pages site not found".
+#
+# The site is published at https://<owner>.github.io/<repo>/ , so the build is
+# given a matching base path. A custom domain would need VITE_BASE set to "/".
+name: Deploy to Pages
+
+on:
+  push:
+    branches:
+      - main
+      # This repository has no `main` branch yet — the default branch is the
+      # development branch below, so it is listed here to make the workflow
+      # actually run. Delete this line once `main` exists.
+      - claude/poker-equity-trainer-ksqd87
+  workflow_dispatch:
+
+# Least privilege: read the code, write a Pages deployment, and mint the OIDC
+# token the deploy action needs. Nothing else.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deployments race; let an in-flight run finish rather than
+# cancelling it mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The engine's correctness is the whole point of the app, so a failing
+      # test must block the deploy rather than ship a trainer that teaches
+      # wrong answers.
+      - name: Run engine tests
+        run: npm test
+
+      - name: Typecheck and build
+        run: npm run build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+
+      # Confirms the built bundle really works with the network off, in a real
+      # browser, before it is published.
+      - name: Install Chromium for the PWA check
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify the PWA works offline
+        run: npm run verify:pwa
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

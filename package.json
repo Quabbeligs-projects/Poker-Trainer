@@ -11,7 +11,10 @@
     "test:watch": "vitest",
     "bench": "vitest run --testNamePattern=benchmark",
     "grids": "vite-node scripts/renderRangeGrids.mjs",
-    "generate:handstrength": "vite-node scripts/generateHandStrength.mjs"
+    "generate:handstrength": "vite-node scripts/generateHandStrength.mjs",
+    "sanity": "vite-node scripts/solverSanity.mjs",
+    "icons": "node scripts/generateIcons.mjs",
+    "verify:pwa": "node scripts/verifyPwa.mjs"
   },
   "dependencies": {
     "phe": "^0.6.0",
@@ -21,11 +24,13 @@
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright": "^1.62.1",
     "poker-evaluator": "^2.1.1",
     "pokersolver": "^2.1.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^2.1.8"
   }
 }

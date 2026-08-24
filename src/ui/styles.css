@@ -1,0 +1,140 @@
+/*
+ * Shared shell styling. Dark-committed: the trainer is meant to be used in a
+ * dark room, and a four-colour deck needs a consistent ground to read against.
+ */
+:root {
+  --ground: #0F1A18;
+  --surface: #16211F;
+  --line: #2A3735;
+  --ink: #ECE7DA;
+  --ink-2: #A8B3AD;
+  --ink-3: #78847E;
+  --gold: #D9A441;
+  --good: #5FAE98;
+  --bad: #D2705A;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+  /* Stops iOS double-tap-to-zoom on controls without disabling pinch zoom. */
+  touch-action: manipulation;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  /* Respect the notch and the home indicator in standalone mode. */
+  padding:
+    calc(env(safe-area-inset-top) + 28px)
+    calc(env(safe-area-inset-right) + 20px)
+    calc(env(safe-area-inset-bottom) + 48px)
+    calc(env(safe-area-inset-left) + 20px);
+}
+
+h1 {
+  font-size: clamp(26px, 6vw, 34px);
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: 19px;
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+}
+
+.lede { color: var(--ink-2); margin: 0 0 16px; }
+.note { color: var(--ink-3); font-size: 14px; margin: 0 0 14px; }
+
+section {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  margin-top: 28px;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.chip {
+  font-size: 12.5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+}
+.chip.ok { color: var(--good); border-color: var(--good); }
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: #10201C;
+  background: var(--gold);
+  border: none;
+  border-radius: 10px;
+  /* Comfortably over the 44pt minimum touch target. */
+  min-height: 52px;
+  padding: 0 26px;
+  width: 100%;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: default; }
+button:focus-visible { outline: 3px solid var(--good); outline-offset: 3px; }
+
+.scroller { overflow-x: auto; margin-top: 18px; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 14px 6px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 9px 14px 9px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+/* The scenario column carries long labels; letting it wrap keeps the numeric
+   columns — especially the error column — on screen at iPhone widths. */
+td:first-child { white-space: normal; min-width: 8ch; }
+
+@media (max-width: 430px) {
+  table { font-size: 13px; }
+  th, td { padding-right: 8px; }
+  th { font-size: 11px; letter-spacing: 0.04em; }
+}
+
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+
+.verdict { font-size: 14px; margin: 14px 0 0; }
+
+footer {
+  margin-top: 32px;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

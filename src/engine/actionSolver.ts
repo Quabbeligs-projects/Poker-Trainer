@@ -81,6 +81,39 @@ export const EV_TOLERANCE_FRACTION = 0.05;
  */
 export const EV_TOLERANCE_POT_FRACTION = 0.01;
 
+/**
+ * The prices a bet or raise creates, for hero and for the opponent.
+ *
+ * Exported because a caller who wants an honest `equityVsContinuing` must split
+ * the opponent's range at exactly the price the solver will use. Deriving that
+ * price independently would let the two drift apart silently.
+ */
+export interface ActionPricing {
+  /** Total chips hero puts in for the bet or raise. */
+  readonly betSize: number;
+  /** Chips the opponent must add to continue. */
+  readonly villainMustCall: number;
+  /** Pot the opponent is calling into, before their call. */
+  readonly potVillainFaces: number;
+}
+
+/**
+ * Works out the sizing for a bet (when `toCall` is zero) or a raise.
+ *
+ * A raise calls the outstanding bet and then raises `BET_FRACTION` of the pot
+ * that calling would create.
+ */
+export function priceAction(pot: number, toCall: number): ActionPricing {
+  const betSize = toCall > 0
+    ? toCall + BET_FRACTION * (pot + toCall)
+    : BET_FRACTION * pot;
+  return {
+    betSize,
+    villainMustCall: toCall > 0 ? betSize - toCall : betSize,
+    potVillainFaces: pot + betSize,
+  };
+}
+
 export interface ActionEV {
   readonly action: ActionKind;
   /** Expected value in chips, relative to folding. */
@@ -152,17 +185,13 @@ export function solveAction(input: ActionSolverInput): ActionSolution {
   const firedRules: string[] = [];
 
   // ---- Sizing -------------------------------------------------------------
-  const betSize = facingBet
-    ? toCall + BET_FRACTION * (pot + toCall)
-    : BET_FRACTION * pot;
+  const { betSize, villainMustCall, potVillainFaces } = priceAction(pot, toCall);
 
   // ---- Fold equity --------------------------------------------------------
-  // The opponent's fold decision turns on the price THEY are laid, so work out
-  // what they must call and into what pot. For a bet they call `betSize` into
-  // `pot + betSize`. For a raise they have already invested `toCall`, so they
-  // add only the difference into a pot that already contains hero's raise.
-  const villainMustCall = facingBet ? betSize - toCall : betSize;
-  const potVillainFaces = pot + betSize;
+  // The opponent's fold decision turns on the price THEY are laid. For a bet
+  // they call `betSize` into `pot + betSize`. For a raise they have already
+  // invested `toCall`, so they add only the difference into a pot that already
+  // contains hero's raise.
   const split = splitByFoldDecision(opponentRange, board, villainMustCall, potVillainFaces);
   const foldEquity = split.foldFrequency;
   const equityVsContinuing = input.equityVsContinuing ?? equity;
