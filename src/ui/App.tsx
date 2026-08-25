@@ -66,16 +66,36 @@ function useStandalone(): boolean {
   return standalone;
 }
 
+/**
+ * Tracks connectivity.
+ *
+ * Reading `navigator.onLine` once and then relying purely on `online`/`offline`
+ * events is a trap: when a document LOADS while already offline, no event ever
+ * fires, so a stale first read is never corrected. If the initial render
+ * happens in the window before the value settles, the indicator is wrong
+ * permanently. So re-read whenever the effect attaches, and again whenever the
+ * page is restored or becomes visible, which is also when a phone coming out of
+ * standby needs re-checking.
+ *
+ * Even with this, `navigator.onLine` only reports whether a network interface
+ * exists — it cannot tell a captive portal or an emulated offline mode from
+ * real connectivity. It is a hint for the reader, never a fact the app relies
+ * on, which is why nothing here gates on it.
+ */
 function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
+    const sync = () => setOnline(navigator.onLine);
+    sync(); // closes the gap between document creation and this effect
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    window.addEventListener('pageshow', sync);
+    document.addEventListener('visibilitychange', sync);
     return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+      window.removeEventListener('pageshow', sync);
+      document.removeEventListener('visibilitychange', sync);
     };
   }, []);
   return online;
