@@ -13,10 +13,6 @@ on:
   push:
     branches:
       - main
-      # This repository has no `main` branch yet — the default branch is the
-      # development branch below, so it is listed here to make the workflow
-      # actually run. Delete this line once `main` exists.
-      - claude/poker-equity-trainer-ksqd87
   workflow_dispatch:
 
 # Least privilege: read the code, write a Pages deployment, and mint the OIDC
@@ -58,7 +54,10 @@ jobs:
           VITE_BASE: /${{ github.event.repository.name }}/
 
       # Confirms the built bundle really works with the network off, in a real
-      # browser, before it is published.
+      # browser, before it is published. Only functional checks can fail this
+      # step: that the service worker controls the page, that a precached asset
+      # resolves offline while a never-cached URL does not, and that the engine
+      # still computes correct equities. Cosmetic checks report as warnings.
       - name: Install Chromium for the PWA check
         run: npx playwright install --with-deps chromium
 
