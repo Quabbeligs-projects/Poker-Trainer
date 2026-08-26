@@ -1,0 +1,53 @@
+{
+  "_comment": "Feedback templates. Each key holds one or more variants; the variant is chosen deterministically from the hand seed, so replaying a seed reads identically. Placeholders in {braces} are filled with values computed by the engine — no text here is generated at runtime.",
+
+  "HIT_PROBABILITY": [
+    "You said {given}% but you have {outs} outs with {cards} to come: that is {exact}% exactly, or {rule}% by the rule of 4 and 2. Either would have been accepted.",
+    "{outs} outs, {cards} card(s) to come. Exact is {exact}%; the shortcut gives {rule}%. You answered {given}%."
+  ],
+
+  "EQUITY_UNDER": [
+    "You estimated {given}% but true equity is {truth}% — {gap} points low. You are counting only the times you improve and ignoring the {asIs}% you win with {category} as it stands.",
+    "{given}% is {gap} points under the true {truth}%. Your hand wins {asIs}% of the time without improving at all."
+  ],
+
+  "EQUITY_OVER": [
+    "You estimated {given}% but true equity is {truth}% — {gap} points high. Counting outs assumes every one of them wins; against this range they do not.",
+    "{given}% is {gap} points over the true {truth}%. Some of those outs give your opponent a better hand at the same time."
+  ],
+
+  "EQUITY_SOURCE": [
+    "Where it comes from: {asIs} points from {category} already being good, {improved} points from improving. You improve {improveRate}% of the time.",
+    "Breakdown: {asIs}% as-is with {category}, plus {improved}% from improving on {improveRate}% of runouts."
+  ],
+
+  "POT_ODDS_ARITHMETIC": [
+    "Pot odds are arithmetic, not estimation: {call} to call into {pot} is {call}/{total} = {truth}%. You said {given}%.",
+    "You said {given}%; it is {truth}%. Calling {call} into {pot} means risking {call} to win {total}."
+  ],
+
+  "ACTION_SHOULD_FOLD": [
+    "You chose {given}, but folding is correct here: {equity}% equity against a {potOdds}% price, with no fold equity to make up the difference.",
+    "This is a fold. {equity}% equity does not meet the {potOdds}% the price demands, and {given} only puts in more."
+  ],
+
+  "ACTION_TOO_PASSIVE": [
+    "You chose {given}; {best} is better. With {equity}% equity and the opponent folding {foldEquity}% of the time, there is more value in putting chips in.",
+    "{given} leaves value behind. {best} is correct: {equity}% equity plus {foldEquity}% fold equity."
+  ],
+
+  "ACTION_TOO_AGGRESSIVE": [
+    "You chose {given}; {best} is better. {equity}% equity does not justify the extra chips when the opponent folds only {foldEquity}% of the time.",
+    "{given} overplays this. {best} is correct — fold equity is only {foldEquity}%."
+  ],
+
+  "TIMEOUT": [
+    "Time ran out. The hand counts as a loss regardless of what was entered.",
+    "Timer expired before the hand was answered."
+  ],
+
+  "CORRECT": [
+    "Correct. {equity}% equity, {action} is the play.",
+    "All three right: {equity}% equity, and {action} is correct."
+  ]
+}

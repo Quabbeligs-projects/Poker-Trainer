@@ -1,0 +1,412 @@
+import { describe, expect, it } from 'vitest';
+
+import rangesJson from '../src/data/ranges.json';
+import { RangeCharts, type RangeChartsJson } from '../src/engine/ranges';
+import { createRng } from '../src/engine/deck';
+import { classifyCombo } from '../src/engine/rangeNarrowing';
+import { OutsHand, buildPreflopHand, gradePreflop, solvePreflop } from '../src/game/session';
+import { gradeHand } from '../src/game/grading';
+import { buildOutsSpot, HAND_MIX_WEIGHTS, priceOnStreet } from '../src/game/spot';
+import {
+  DEFAULT_SETTINGS,
+  EQUITY_TOLERANCE,
+  HIT_PROBABILITY_TOLERANCE,
+  POT_ODDS_TOLERANCE,
+  type HandInput,
+  type Settings,
+  timeTrialChoices,
+} from '../src/game/types';
+
+const charts = new RangeCharts(rangesJson as unknown as RangeChartsJson);
+const settings: Settings = { ...DEFAULT_SETTINGS, playerCount: 6 };
+/** Fewer iterations keeps the suite fast; accuracy is covered by equity tests. */
+const ITER = 20_000;
+
+const perfect = (hand: OutsHand): HandInput => {
+  const truth = hand.current.truth!;
+  return {
+    hitProbability: truth.hitProbability?.exact ?? null,
+    equity: truth.equity.percent,
+    potOdds: truth.potOdds.percent,
+    action: truth.action.best,
+    timedOut: false,
+  };
+};
+
+describe('ground truth is frozen before the hand is shown', () => {
+  it('deep-freezes every part of the truth object', () => {
+    const truth = new OutsHand('freeze-me', settings, charts, ITER).current.truth!;
+    expect(Object.isFrozen(truth)).toBe(true);
+    expect(Object.isFrozen(truth.equity)).toBe(true);
+    expect(Object.isFrozen(truth.action)).toBe(true);
+    expect(Object.isFrozen(truth.seats)).toBe(true);
+    expect(Object.isFrozen(truth.heroCards)).toBe(true);
+    if (truth.equity.breakdown !== null) {
+      expect(Object.isFrozen(truth.equity.breakdown)).toBe(true);
+    }
+  });
+
+  it('throws rather than silently accepting a write', () => {
+    const truth = new OutsHand('immutable', settings, charts, ITER).current.truth!;
+    // Modules are strict mode, so writing to a frozen object throws.
+    expect(() => {
+      (truth as unknown as { pot: number }).pot = 999999;
+    }).toThrow(TypeError);
+    expect(() => {
+      (truth.equity as unknown as { percent: number }).percent = 0;
+    }).toThrow(TypeError);
+  });
+
+  it('is not changed by grading, whatever the input', () => {
+    const hand = new OutsHand('unchanged', settings, charts, ITER);
+    const truth = hand.current.truth!;
+    const before = JSON.stringify(truth);
+    for (const equity of [0, 50, 100, -10, 1e9]) {
+      gradeHand(truth, {
+        hitProbability: equity, equity, potOdds: equity,
+        action: 'raise', timedOut: false,
+      });
+    }
+    expect(JSON.stringify(truth)).toBe(before);
+  });
+
+  it('grades identically however many times it is called', () => {
+    const hand = new OutsHand('pure', settings, charts, ITER);
+    const truth = hand.current.truth!;
+    const input: HandInput = {
+      hitProbability: 30, equity: 40, potOdds: 25, action: 'call', timedOut: false,
+    };
+    const first = JSON.stringify(gradeHand(truth, input));
+    for (let i = 0; i < 5; i++) {
+      expect(JSON.stringify(gradeHand(truth, input))).toBe(first);
+    }
+  });
+});
+
+describe('Outs mode', () => {
+  it('always presents hero with a real price', () => {
+    for (let i = 0; i < 25; i++) {
+      const truth = new OutsHand(`price-${i}`, settings, charts, 2_000).current.truth!;
+      expect(truth.toCall).toBeGreaterThan(0);
+      expect(truth.pot).toBeGreaterThan(truth.toCall);
+      expect(truth.potOdds.percent).toBeGreaterThan(0);
+      expect(truth.potOdds.percent).toBeLessThan(50);
+    }
+  });
+
+  it('starts on the flop with three board cards', () => {
+    const truth = new OutsHand('flop-start', settings, charts, ITER).current.truth!;
+    expect(truth.street).toBe('flop');
+    expect(truth.board).toHaveLength(3);
+    expect(truth.hitProbability).not.toBeNull();
+    expect(truth.equity.breakdown).not.toBeNull();
+  });
+
+  it('advances to the turn when the flop is answered correctly', () => {
+    const hand = new OutsHand('advance', settings, charts, ITER);
+    const input = perfect(hand);
+    // Force a non-fold so the hand continues.
+    const action = hand.current.truth!.action.accepted.find((a) => a !== 'fold')
+      ?? hand.current.truth!.action.best;
+    const { grade, state } = hand.submit({ ...input, action });
+    if (action === 'fold') return; // covered by the fold test
+    expect(grade.passed).toBe(true);
+    expect(state.phase).toBe('turn');
+    expect(state.truth!.board).toHaveLength(4);
+    expect(state.truth!.hitProbability!.cardsToCome).toBe(1);
+  });
+
+  it('ends the hand as a win on a correct fold, without dealing the turn', () => {
+    // Find a seed where folding is correct.
+    for (let i = 0; i < 60; i++) {
+      const hand = new OutsHand(`fold-${i}`, settings, charts, 5_000);
+      if (hand.current.truth!.action.best !== 'fold') continue;
+      const { grade, state } = hand.submit({ ...perfect(hand), action: 'fold' });
+      expect(grade.passed).toBe(true);
+      expect(state.phase).toBe('won');
+      expect(state.outcome).toBe('won');
+      expect(state.outcomeReason).toMatch(/fold/);
+      return;
+    }
+    throw new Error('No seed produced a correct fold; the spot mix may be wrong');
+  });
+
+  it('ends the hand as a loss on any wrong answer', () => {
+    const hand = new OutsHand('lose', settings, charts, ITER);
+    const { grade, state } = hand.submit({
+      ...perfect(hand), equity: hand.current.truth!.equity.percent + 40,
+    });
+    expect(grade.passed).toBe(false);
+    expect(state.phase).toBe('lost');
+    expect(state.outcome).toBe('lost');
+  });
+
+  it('counts a timeout as a loss regardless of the answers', () => {
+    const hand = new OutsHand('timeout', settings, charts, ITER);
+    const { grade, state } = hand.submit({ ...perfect(hand), timedOut: true });
+    expect(grade.passed).toBe(false);
+    expect(grade.mistakes).toContain('TIMEOUT');
+    expect(state.outcome).toBe('lost');
+  });
+
+  it('refuses further input once the hand is over', () => {
+    const hand = new OutsHand('over', settings, charts, ITER);
+    hand.submit({ ...perfect(hand), equity: 0 });
+    expect(() => hand.submit(perfect(hand))).toThrow(/already over/);
+  });
+
+  it('replays a seed exactly', () => {
+    const a = new OutsHand('replay-me', settings, charts, ITER).current.truth!;
+    const b = new OutsHand('replay-me', settings, charts, ITER).current.truth!;
+    expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+  });
+
+  it('gives different seeds different hands', () => {
+    const a = new OutsHand('seed-a', settings, charts, 2_000).current.truth!;
+    const b = new OutsHand('seed-b', settings, charts, 2_000).current.truth!;
+    expect(JSON.stringify(a.heroCards)).not.toBe(JSON.stringify(b.heroCards));
+  });
+});
+
+describe('the hand mix', () => {
+  it('never deals pure air, and leans toward draws', () => {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 300; i++) {
+      const spot = buildOutsSpot(`mix-${i}`, settings, charts, createRng(`mix-${i}`));
+      counts.set(spot.heroClass, (counts.get(spot.heroClass) ?? 0) + 1);
+    }
+    expect(counts.get('nothing') ?? 0).toBe(0);
+    const draws = (counts.get('strongDraw') ?? 0) + (counts.get('weakDraw') ?? 0);
+    const made = (counts.get('monster') ?? 0) + (counts.get('strong') ?? 0);
+    expect(draws).toBeGreaterThan(made);
+    // Made hands are still present: they are the clearest demonstration that
+    // counting outs and estimating equity are different questions.
+    expect(made).toBeGreaterThan(0);
+  });
+
+  it('agrees with the classifier about what it dealt', () => {
+    for (let i = 0; i < 30; i++) {
+      const spot = buildOutsSpot(`agree-${i}`, settings, charts, createRng(`agree-${i}`));
+      expect(classifyCombo(spot.heroCards[0]!, spot.heroCards[1]!, spot.flop).madeClass)
+        .toBe(spot.heroClass);
+    }
+  });
+
+  it('excludes exactly the classes weighted at zero', () => {
+    for (const [handClass, weight] of Object.entries(HAND_MIX_WEIGHTS)) {
+      if (weight === 0) expect(handClass).toBe('nothing');
+    }
+  });
+
+  it('prices the turn from a pot that includes the called flop bet', () => {
+    const spot = buildOutsSpot('pricing', settings, charts, createRng('pricing'));
+    const flop = priceOnStreet(spot, 'flop');
+    const turn = priceOnStreet(spot, 'turn');
+    expect(turn.pot).toBeGreaterThan(flop.pot);
+    expect(turn.pot - turn.toCall).toBe(spot.potAfterPreflop + flop.toCall * 2);
+  });
+});
+
+describe('grading', () => {
+  const truthFor = (seed: string) => new OutsHand(seed, settings, charts, ITER).current.truth!;
+
+  it('accepts an answer inside every tolerance', () => {
+    const truth = truthFor('tolerant');
+    const grade = gradeHand(truth, {
+      hitProbability: truth.hitProbability!.exact + HIT_PROBABILITY_TOLERANCE - 0.01,
+      equity: truth.equity.percent + EQUITY_TOLERANCE - 0.01,
+      potOdds: truth.potOdds.percent + POT_ODDS_TOLERANCE - 0.01,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.passed).toBe(true);
+  });
+
+  it('rejects an answer just outside a tolerance', () => {
+    const truth = truthFor('intolerant');
+    const grade = gradeHand(truth, {
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent + EQUITY_TOLERANCE + 0.5,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.passed).toBe(false);
+    expect(grade.mistakes).toContain('EQUITY_OVER');
+  });
+
+  it('accepts hit probability at EITHER anchor', () => {
+    // The rule of 4 and 2 and the exact figure are both right answers to the
+    // question asked; grading against one alone would fail the other.
+    const truth = truthFor('anchors');
+    const { exact, ruleOfThumb } = truth.hitProbability!;
+    for (const answer of [exact, ruleOfThumb]) {
+      const grade = gradeHand(truth, {
+        hitProbability: answer,
+        equity: truth.equity.percent,
+        potOdds: truth.potOdds.percent,
+        action: truth.action.best,
+        timedOut: false,
+      });
+      expect(grade.hitProbability!.correct, `answer ${answer}`).toBe(true);
+    }
+  });
+
+  it('rejects a hit probability outside both anchors', () => {
+    const truth = truthFor('anchors-miss');
+    const { exact, ruleOfThumb } = truth.hitProbability!;
+    const wild = Math.max(exact, ruleOfThumb) + 20;
+    const grade = gradeHand(truth, {
+      hitProbability: wild,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.hitProbability!.correct).toBe(false);
+    expect(grade.mistakes).toContain('HIT_PROBABILITY');
+  });
+
+  it('names the direction of an equity miss', () => {
+    const truth = truthFor('direction');
+    const under = gradeHand(truth, {
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent - 20,
+      potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
+    });
+    expect(under.mistakes).toContain('EQUITY_UNDER');
+    const over = gradeHand(truth, {
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent + 20,
+      potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
+    });
+    expect(over.mistakes).toContain('EQUITY_OVER');
+  });
+
+  it('produces a populated diagnosis and the solver rules verbatim', () => {
+    const truth = truthFor('diagnosis');
+    const grade = gradeHand(truth, {
+      hitProbability: 0, equity: 0, potOdds: 0, action: 'raise', timedOut: false,
+    });
+    expect(grade.diagnosis.length).toBeGreaterThan(0);
+    for (const line of grade.diagnosis) {
+      expect(line).not.toMatch(/\{|\}/); // every placeholder was filled
+      expect(line.length).toBeGreaterThan(10);
+    }
+    expect(grade.firedRules).toEqual(truth.action.firedRules);
+  });
+
+  it('reports every field side by side, answered or not', () => {
+    const truth = truthFor('side-by-side');
+    const grade = gradeHand(truth, {
+      hitProbability: null, equity: null, potOdds: null, action: null, timedOut: false,
+    });
+    expect(grade.equity!.given).toBeNull();
+    expect(grade.equity!.truth).toBeCloseTo(truth.equity.percent, 9);
+    expect(grade.potOdds!.correct).toBe(false);
+    expect(grade.action.correct).toBe(false);
+  });
+});
+
+describe('Preflop mode', () => {
+  it('raises a premium hand when folded to hero', () => {
+    const result = solvePreflop(
+      charts, settings, 0, [51, 47], 'foldedToHero', null,
+    ); // As Ah
+    expect(result.accepted).toContain('raise');
+    expect(result.rules.join(' ')).toMatch(/opening range/);
+  });
+
+  it('folds trash when folded to hero, never calls', () => {
+    // 7s 2h — the worst hand, not in any opening range.
+    const codes = [20 + 0, 0 + 1];
+    const result = solvePreflop(charts, settings, 0, codes, 'foldedToHero', null);
+    expect(result.accepted).toEqual(['fold']);
+    expect(result.accepted).not.toContain('call');
+  });
+
+  it('builds a hand whose truth is frozen', () => {
+    const truth = buildPreflopHand('pf-frozen', settings, charts);
+    expect(Object.isFrozen(truth)).toBe(true);
+    expect(() => {
+      (truth as unknown as { best: string }).best = 'fold';
+    }).toThrow(TypeError);
+  });
+
+  it('always offers at least one accepted action', () => {
+    for (let i = 0; i < 60; i++) {
+      const truth = buildPreflopHand(`pf-${i}`, settings, charts);
+      expect(truth.accepted.length).toBeGreaterThan(0);
+      expect(truth.accepted).toContain(truth.best);
+      expect(truth.firedRules.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('grades against the accepted set', () => {
+    const truth = buildPreflopHand('pf-grade', settings, charts);
+    expect(gradePreflop(truth, truth.best, false).passed).toBe(true);
+    const wrong = (['fold', 'call', 'raise'] as const)
+      .find((a) => !truth.accepted.includes(a));
+    if (wrong !== undefined) {
+      const grade = gradePreflop(truth, wrong, false);
+      expect(grade.passed).toBe(false);
+      expect(grade.mistakes.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('counts a timeout as a loss', () => {
+    const truth = buildPreflopHand('pf-timeout', settings, charts);
+    const grade = gradePreflop(truth, truth.best, true);
+    expect(grade.passed).toBe(false);
+    expect(grade.mistakes).toContain('TIMEOUT');
+  });
+
+  it('replays a seed exactly', () => {
+    const a = buildPreflopHand('pf-replay', settings, charts);
+    const b = buildPreflopHand('pf-replay', settings, charts);
+    expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+  });
+});
+
+describe('settings', () => {
+  it('offers 5:00 down to 0:15 in 15-second steps', () => {
+    const choices = timeTrialChoices();
+    expect(choices[0]).toBe(300);
+    expect(choices[choices.length - 1]).toBe(15);
+    for (let i = 1; i < choices.length; i++) {
+      expect(choices[i - 1]! - choices[i]!).toBe(15);
+    }
+  });
+
+  it('defaults to the timer off and a random seat', () => {
+    expect(DEFAULT_SETTINGS.timePerHandSeconds).toBeNull();
+    expect(DEFAULT_SETTINGS.fixedSeatIndex).toBeNull();
+  });
+
+  it('honours a fixed seat and randomises otherwise', () => {
+    const fixed: Settings = { ...settings, fixedSeatIndex: 2 };
+    for (let i = 0; i < 10; i++) {
+      expect(new OutsHand(`fixed-${i}`, fixed, charts, 2_000).current.truth!.heroSeatIndex)
+        .toBe(2);
+    }
+    const seatsSeen = new Set<number>();
+    for (let i = 0; i < 30; i++) {
+      seatsSeen.add(new OutsHand(`rand-${i}`, settings, charts, 2_000).current.truth!.heroSeatIndex);
+    }
+    expect(seatsSeen.size).toBeGreaterThan(1);
+  });
+
+  it('works at every legal table size', () => {
+    for (let players = 2; players <= 10; players++) {
+      const truth = new OutsHand(`size-${players}`, { ...settings, playerCount: players },
+        charts, 2_000).current.truth!;
+      expect(truth.seats).toHaveLength(players);
+      expect(truth.toCall).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects Outs mode with a single player', () => {
+    expect(() => new OutsHand('solo', { ...settings, playerCount: 1 }, charts, 2_000))
+      .toThrow(/at least two players/);
+  });
+});

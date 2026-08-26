@@ -5,7 +5,7 @@ action selection. No network calls, no API keys, no LLM — every "correct answe
 is computed deterministically from a seeded RNG, so a wrong training signal can
 only come from a bug, never from a model's guess.
 
-**Status: engine steps 1–3 complete** (deck, evaluator, ranges, Monte Carlo
+**Status: engine steps 1–4 complete** (deck, evaluator, ranges, Monte Carlo
 equity, pot odds, table-size scaling, range narrowing, action solver), plus a
 deployable PWA shell. 217 tests passing. Game modes and the trainer UI next.
 
@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 217 tests, ~18s
+npm test            # 274 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -384,8 +384,51 @@ make on the same board, minimised over every possible pair of blanks. Without
 that benchmark, any card pairing the board counts as an out — a nut flush draw
 scores 23 outs and the rule of 4 claims 92%.
 
+## Game layer
+
+`src/game/` holds the two mode state machines. Both follow the same shape: a
+hand is built and its truth frozen before it reaches the caller, the caller
+submits input, and grading is a pure comparison.
+
+### The truth guarantee
+
+`buildTruth` takes no player input — there is no parameter to pass one through,
+which is deliberate and visible in the signature. `HandTruth` is deeply readonly
+so writing to it is a compile error, and `deepFreeze` freezes it so writing to
+it at runtime throws (modules are strict mode). `gradeHand(truth, input)` is
+pure: tests assert the truth object is byte-identical after grading with wild
+inputs, and that repeated grading returns identical verdicts.
+
+### Grading tolerances
+
+| field | tolerance | why |
+|---|---|---|
+| hit probability | ±2pp of **either** anchor | see below |
+| equity | ±5pp | an estimate, per the spec |
+| pot odds | ±2pp | arithmetic, not estimation |
+| action | in the solver's accepted set | multiple actions can be right |
+
+Hit probability is graded against **two anchors** — the exact probability and
+the rule-of-4-and-2 value — each within ±2pp. The shortcut's error is not noise
+but a deterministic function of the out count: at 15 outs on the flop it reads
+60% against a true 54.1%. Grading against the shortcut alone would mark the
+*correct* answer wrong; grading against the exact figure alone would mark a
+correctly-applied shortcut wrong. Both are right answers to the question asked.
+A single fixed band would have to be ±6pp on the flop to cover 1–15 outs, which
+is far looser than either anchor needs.
+
+### Hand mix
+
+`HAND_MIX_WEIGHTS` in `spot.ts` leans the rotation toward draws (strongDraw 3.0
+down to monster 0.5) while keeping made hands in. Pure air is weighted to zero
+and excluded — facing a bet with no pair and no draw is not a decision.
+
+Made hands are kept deliberately: once hit probability and equity are separate
+inputs, a set with zero outs and 89% equity stops being a grading failure and
+becomes the clearest demonstration that counting outs and estimating equity are
+different questions.
+
 ## Still to build
 
-4. Game state machines (Outs, Preflop)
 5. UI (dark theme, four-colour deck, oval table)
-6. Stats, review mode, PWA packaging
+6. Stats, review mode
