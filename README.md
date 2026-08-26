@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 281 tests, ~25s
+npm test            # 291 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -401,12 +401,26 @@ inputs, and that repeated grading returns identical verdicts.
 
 ### Grading tolerances
 
-| field | tolerance | why |
+Outs mode asks for three numbers, each isolating one skill, then the action:
+
+| field | tolerance | skill |
 |---|---|---|
-| hit probability | ±3pp of the exact value | see below |
-| equity | ±5pp | an estimate, per the spec |
+| outs | exact | mechanical counting |
+| hit probability | ±3pp of the exact value | arithmetic |
+| equity | ±5pp | judgement against a range |
 | pot odds | ±2pp | arithmetic, not estimation |
 | action | in the solver's accepted set | multiple actions can be right |
+
+The out count is asked for rather than displayed, because counting is the part
+that actually gets used at a table — showing the number reduces the drill to
+arithmetic. The `countOutsYourself` setting (on by default) drops back to three
+inputs when five per hand is too slow under a time trial.
+
+**Undercounting is treated as a misplaced judgement, not a miscount.**
+Discounting soft outs — cards that improve the hand into something that still
+loses — is a real technique, but it belongs in the equity estimate. The outs
+field grades the raw improving-card count, and the feedback says exactly that
+when hero enters fewer.
 
 Hit probability is graded against the **exact** probability alone, in a single
 ±3pp band, on both streets.
@@ -439,6 +453,19 @@ the range-blindness figure **exactly unchanged at +7.8pp, sd 23.8** — as it mu
 since that term is measured against exact enumeration rather than any shortcut.
 The two-field design rests on a number no estimator choice can move.
 
+**Spot generation is capped** at 23 outs on the flop and 17 on the turn, so
+hands where the shortcut breaches the band are never dealt. Measured over 2,000
+spots the flop cap rejects 0.00% (the flop never reaches 23 outs in practice)
+and the turn cap rejects 12.70%; rejection just re-deals, so that costs
+generation attempts rather than variety. The mix shifts by at most 2.2pp, on
+`strongDraw`, and the hand-mix weights are deliberately **not** compensated for
+it. Tests assert both caps hold and that every dealt spot lands inside the
+grading band.
+
+The caps also improve the drill independently of tolerance: a 22-out turn count
+is typically padded with soft outs — `2h5d` on `9c3s4d2c` has 12 of its 22 going
+to bottom two pair, which wins almost nothing.
+
 **Where the band stops holding.** The ±3pp band covers 1–15 outs comfortably,
 but the shortcut breaches it at **18+ outs on the turn** and **24+ outs on the
 flop**, and those counts do occur: measured over 1,500 generated spots, 12.4% of
@@ -446,9 +473,8 @@ turn spots have more than 17 outs (max 28). Those are legitimate counts, not an
 over-count — a hand like `2h5d` on `9c3s4d2c` genuinely has 22 improving cards
 (wheel draw 8, two-pair outs 12, trips 2), each verified against the blank
 benchmark. On such a spot a correctly-applied `×2` can be graded wrong. Widening
-the turn band to ±4pp would cover to 21 outs, ±5pp to 28. Left at ±3pp
-deliberately rather than widened silently; the thresholds are asserted in
-`test/outs.test.ts` so any change to either rule shows up.
+the turn band to ±4pp would cover to 21 outs, ±5pp to 28. Left at ±3pp and handled by capping spot generation instead; the thresholds are
+asserted in `test/outs.test.ts` so any change to either rule shows up.
 
 ### Hand mix
 

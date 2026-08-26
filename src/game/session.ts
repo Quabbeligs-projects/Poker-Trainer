@@ -71,7 +71,7 @@ export class OutsHand {
 
   constructor(
     readonly seed: string,
-    settings: Settings,
+    private readonly settings: Settings,
     charts: RangeCharts,
     private readonly iterations?: number,
   ) {
@@ -115,6 +115,7 @@ export class OutsHand {
       heroSeatIndex: this.spot.heroSeatIndex,
       opponentRanges: [range],
       opponentSeats: [opponentSeat],
+      asksForOuts: this.settings.countOutsYourself,
       // A fresh generator per street, derived from the seed, so the flop's
       // Monte Carlo cannot shift the turn's by consuming draws.
       rng: createRng(`${this.seed}:${street}:equity`),

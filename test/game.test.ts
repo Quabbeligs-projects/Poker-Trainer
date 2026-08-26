@@ -6,7 +6,14 @@ import { createRng } from '../src/engine/deck';
 import { classifyCombo } from '../src/engine/rangeNarrowing';
 import { OutsHand, buildPreflopHand, gradePreflop, solvePreflop } from '../src/game/session';
 import { gradeHand } from '../src/game/grading';
-import { buildOutsSpot, HAND_MIX_WEIGHTS, priceOnStreet } from '../src/game/spot';
+import {
+  buildOutsSpot,
+  HAND_MIX_WEIGHTS,
+  MAX_FLOP_OUTS,
+  MAX_TURN_OUTS,
+  priceOnStreet,
+} from '../src/game/spot';
+import { countOuts } from '../src/engine/outs';
 import {
   DEFAULT_SETTINGS,
   EQUITY_TOLERANCE,
@@ -25,6 +32,7 @@ const ITER = 20_000;
 const perfect = (hand: OutsHand): HandInput => {
   const truth = hand.current.truth!;
   return {
+    outs: truth.hitProbability?.outs ?? null,
     hitProbability: truth.hitProbability?.exact ?? null,
     equity: truth.equity.percent,
     potOdds: truth.potOdds.percent,
@@ -63,6 +71,7 @@ describe('ground truth is frozen before the hand is shown', () => {
     const before = JSON.stringify(truth);
     for (const equity of [0, 50, 100, -10, 1e9]) {
       gradeHand(truth, {
+        outs: equity,
         hitProbability: equity, equity, potOdds: equity,
         action: 'raise', timedOut: false,
       });
@@ -74,7 +83,7 @@ describe('ground truth is frozen before the hand is shown', () => {
     const hand = new OutsHand('pure', settings, charts, ITER);
     const truth = hand.current.truth!;
     const input: HandInput = {
-      hitProbability: 30, equity: 40, potOdds: 25, action: 'call', timedOut: false,
+      outs: 9, hitProbability: 30, equity: 40, potOdds: 25, action: 'call', timedOut: false,
     };
     const first = JSON.stringify(gradeHand(truth, input));
     for (let i = 0; i < 5; i++) {
@@ -207,12 +216,145 @@ describe('the hand mix', () => {
   });
 });
 
+describe('out-count caps', () => {
+  it('never deals a spot beyond the caps, on either street', () => {
+    // Past these counts the adjusted shortcut breaches the +/-3pp band, so a
+    // correctly-applied estimate could be graded wrong. They are also poor
+    // drills: a 22-out turn count is mostly soft outs.
+    let checked = 0;
+    for (let i = 0; i < 400; i++) {
+      const spot = buildOutsSpot(`cap-${i}`, settings, charts, createRng(`cap-${i}`));
+      const flopOuts = countOuts(spot.heroCards, spot.flop).total;
+      const turnOuts = countOuts(spot.heroCards, [...spot.flop, spot.turnCard]).total;
+      expect(flopOuts, `flop outs on spot ${i}`).toBeLessThanOrEqual(MAX_FLOP_OUTS);
+      expect(turnOuts, `turn outs on spot ${i}`).toBeLessThanOrEqual(MAX_TURN_OUTS);
+      checked++;
+    }
+    expect(checked).toBe(400);
+  });
+
+  it('keeps every dealt spot inside the grading band', () => {
+    // The caps exist to make this true, so assert the consequence directly
+    // rather than only the mechanism.
+    for (let i = 0; i < 120; i++) {
+      const hand = new OutsHand(`band-${i}`, settings, charts, 2_000);
+      const truth = hand.current.truth!;
+      const { exact, ruleOfThumb } = truth.hitProbability!;
+      expect(
+        Math.abs(ruleOfThumb - exact),
+        `${truth.hitProbability!.outs} outs on the ${truth.street}`,
+      ).toBeLessThanOrEqual(HIT_PROBABILITY_TOLERANCE);
+    }
+  });
+
+  it('still deals plenty of draws after capping', () => {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 300; i++) {
+      const spot = buildOutsSpot(`post-cap-${i}`, settings, charts, createRng(`post-cap-${i}`));
+      counts.set(spot.heroClass, (counts.get(spot.heroClass) ?? 0) + 1);
+    }
+    const draws = (counts.get('strongDraw') ?? 0) + (counts.get('weakDraw') ?? 0);
+    expect(draws / 300).toBeGreaterThan(0.25);
+  });
+});
+
+describe('counting outs yourself', () => {
+  const withOuts = { ...settings, countOutsYourself: true };
+  const withoutOuts = { ...settings, countOutsYourself: false };
+
+  it('is on by default', () => {
+    expect(DEFAULT_SETTINGS.countOutsYourself).toBe(true);
+  });
+
+  it('asks for the count when the setting is on', () => {
+    const truth = new OutsHand('asks', withOuts, charts, ITER).current.truth!;
+    expect(truth.asksForOuts).toBe(true);
+  });
+
+  it('does not ask when the setting is off', () => {
+    const truth = new OutsHand('asks-not', withoutOuts, charts, ITER).current.truth!;
+    expect(truth.asksForOuts).toBe(false);
+    const grade = gradeHand(truth, {
+      outs: null,
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.outs).toBeNull();
+    expect(grade.passed).toBe(true);
+  });
+
+  it('grades the count exactly, with no tolerance', () => {
+    const truth = new OutsHand('exact-outs', withOuts, charts, ITER).current.truth!;
+    const actual = truth.hitProbability!.outs;
+    const grade = (given: number) => gradeHand(truth, {
+      outs: given,
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade(actual).outs!.correct).toBe(true);
+    expect(grade(actual + 1).outs!.correct).toBe(false);
+    expect(grade(actual - 1).outs!.correct).toBe(false);
+  });
+
+  it('explains that a deliberate discount belongs in the equity field', () => {
+    const truth = new OutsHand('discount', withOuts, charts, ITER).current.truth!;
+    const actual = truth.hitProbability!.outs;
+    const grade = gradeHand(truth, {
+      outs: Math.max(0, actual - 3),
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.mistakes).toContain('OUTS_MISCOUNT');
+    expect(grade.diagnosis.join(' ')).toMatch(/soft outs|equity estimate|equity field/i);
+  });
+
+  it('says something different when hero overcounts', () => {
+    const truth = new OutsHand('overcount', withOuts, charts, ITER).current.truth!;
+    const grade = gradeHand(truth, {
+      outs: truth.hitProbability!.outs + 4,
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.mistakes).toContain('OUTS_MISCOUNT');
+    expect(grade.diagnosis.join(' ')).toMatch(/too many|over the actual/i);
+  });
+
+  it('fails the hand on a wrong count even when everything else is right', () => {
+    const hand = new OutsHand('outs-fail', withOuts, charts, ITER);
+    const truth = hand.current.truth!;
+    const { grade } = hand.submit({
+      outs: truth.hitProbability!.outs + 2,
+      hitProbability: truth.hitProbability!.exact,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    expect(grade.passed).toBe(false);
+    expect(grade.outs!.correct).toBe(false);
+    expect(grade.equity!.correct).toBe(true);
+  });
+});
+
 describe('grading', () => {
   const truthFor = (seed: string) => new OutsHand(seed, settings, charts, ITER).current.truth!;
 
   it('accepts an answer inside every tolerance', () => {
     const truth = truthFor('tolerant');
     const grade = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.exact + HIT_PROBABILITY_TOLERANCE - 0.01,
       equity: truth.equity.percent + EQUITY_TOLERANCE - 0.01,
       potOdds: truth.potOdds.percent + POT_ODDS_TOLERANCE - 0.01,
@@ -225,6 +367,7 @@ describe('grading', () => {
   it('rejects an answer just outside a tolerance', () => {
     const truth = truthFor('intolerant');
     const grade = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.exact,
       equity: truth.equity.percent + EQUITY_TOLERANCE + 0.5,
       potOdds: truth.potOdds.percent,
@@ -239,6 +382,7 @@ describe('grading', () => {
     const truth = truthFor('anchors');
     const { exact } = truth.hitProbability!;
     const grade = (answer: number) => gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: answer,
       equity: truth.equity.percent,
       potOdds: truth.potOdds.percent,
@@ -255,6 +399,7 @@ describe('grading', () => {
   it('accepts a correctly applied shortcut, which is the point of the band', () => {
     const truth = truthFor('shortcut');
     const grade = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.ruleOfThumb,
       equity: truth.equity.percent,
       potOdds: truth.potOdds.percent,
@@ -277,6 +422,7 @@ describe('grading', () => {
     const accepted: number[] = [];
     for (let answer = 0; answer <= 100; answer += 0.25) {
       const correct = gradeHand(truth, {
+        outs: truth.hitProbability?.outs ?? null,
         hitProbability: answer,
         equity: truth.equity.percent,
         potOdds: truth.potOdds.percent,
@@ -294,6 +440,7 @@ describe('grading', () => {
   it('rejects a hit probability well outside the band', () => {
     const truth = truthFor('anchors-miss');
     const grade = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.exact + 20,
       equity: truth.equity.percent,
       potOdds: truth.potOdds.percent,
@@ -307,12 +454,14 @@ describe('grading', () => {
   it('names the direction of an equity miss', () => {
     const truth = truthFor('direction');
     const under = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.exact,
       equity: truth.equity.percent - 20,
       potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
     });
     expect(under.mistakes).toContain('EQUITY_UNDER');
     const over = gradeHand(truth, {
+      outs: truth.hitProbability?.outs ?? null,
       hitProbability: truth.hitProbability!.exact,
       equity: truth.equity.percent + 20,
       potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
@@ -323,7 +472,7 @@ describe('grading', () => {
   it('produces a populated diagnosis and the solver rules verbatim', () => {
     const truth = truthFor('diagnosis');
     const grade = gradeHand(truth, {
-      hitProbability: 0, equity: 0, potOdds: 0, action: 'raise', timedOut: false,
+      outs: 0, hitProbability: 0, equity: 0, potOdds: 0, action: 'raise', timedOut: false,
     });
     expect(grade.diagnosis.length).toBeGreaterThan(0);
     for (const line of grade.diagnosis) {
@@ -336,7 +485,8 @@ describe('grading', () => {
   it('reports every field side by side, answered or not', () => {
     const truth = truthFor('side-by-side');
     const grade = gradeHand(truth, {
-      hitProbability: null, equity: null, potOdds: null, action: null, timedOut: false,
+      outs: null, hitProbability: null, equity: null, potOdds: null, action: null,
+      timedOut: false,
     });
     expect(grade.equity!.given).toBeNull();
     expect(grade.equity!.truth).toBeCloseTo(truth.equity.percent, 9);

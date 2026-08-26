@@ -15,6 +15,7 @@ import feedbackTemplates from '../data/feedback.json';
 import {
   EQUITY_TOLERANCE,
   HIT_PROBABILITY_TOLERANCE,
+  OUTS_TOLERANCE,
   POT_ODDS_TOLERANCE,
   type ActionGrade,
   type FieldGrade,
@@ -68,6 +69,17 @@ function gradeNumeric(
 }
 
 /**
+ * Grades the out count, which must be exactly right.
+ *
+ * Returns null when hero was not asked — either the board has no cards to come,
+ * or the "count outs yourself" setting is off and the number was shown.
+ */
+function gradeOuts(truth: HandTruth, given: number | null): FieldGrade | null {
+  if (!truth.asksForOuts || truth.hitProbability === null) return null;
+  return gradeNumeric(given, truth.hitProbability.outs, OUTS_TOLERANCE);
+}
+
+/**
  * Grades the hit-probability answer against the exact probability.
  *
  * A single anchor and a single band. The adjusted rule of 4 and 2 that players
@@ -109,6 +121,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
     diagnosis.push(template('TIMEOUT', truth.seed, {}));
   }
 
+  const outs = gradeOuts(truth, input.outs);
   const hitProbability = gradeHitProbability(truth, input.hitProbability);
   const equity = truth.street === 'preflop'
     ? null
@@ -117,6 +130,20 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
     ? null
     : gradeNumeric(input.potOdds, truth.potOdds.percent, POT_ODDS_TOLERANCE);
   const action = gradeAction(truth, input.action);
+
+  /* --- outs -------------------------------------------------------------- */
+  if (outs !== null && !outs.correct && truth.hitProbability !== null) {
+    mistakes.push('OUTS_MISCOUNT');
+    const undercounted = outs.error !== null && outs.error < 0;
+    // Undercounting is usually deliberate: hero discounted outs that improve
+    // the hand to something that still loses. Say where that judgement belongs
+    // rather than treating it as a miscount.
+    diagnosis.push(template(undercounted ? 'OUTS_DISCOUNTED' : 'OUTS_MISCOUNT', truth.seed, {
+      given: outs.given === null ? '—' : outs.given,
+      truth: truth.hitProbability.outs,
+      difference: outs.error === null ? '—' : Math.abs(outs.error),
+    }));
+  }
 
   /* --- hit probability --------------------------------------------------- */
   if (hitProbability !== null && !hitProbability.correct && truth.hitProbability !== null) {
@@ -198,6 +225,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   }
 
   const passed = !input.timedOut
+    && (outs === null || outs.correct)
     && (hitProbability === null || hitProbability.correct)
     && (equity === null || equity.correct)
     && (potOdds === null || potOdds.correct)
@@ -210,6 +238,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
 
   return {
     passed,
+    outs,
     hitProbability,
     equity,
     potOdds,

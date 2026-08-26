@@ -50,6 +50,8 @@ export interface TruthInputs {
   readonly opponentSeats: readonly Seat[];
   readonly rng: Rng;
   readonly iterations?: number;
+  /** Whether hero is asked to count the outs themselves. */
+  readonly asksForOuts: boolean;
 }
 
 /**
@@ -61,7 +63,8 @@ export interface TruthInputs {
 export function buildTruth(inputs: TruthInputs): HandTruth {
   const {
     seed, street, heroCards, board, pot, toCall, seats, heroSeatIndex,
-    opponentRanges, opponentSeats, rng, iterations = DEFAULT_ITERATIONS,
+    opponentRanges, opponentSeats, rng, asksForOuts,
+    iterations = DEFAULT_ITERATIONS,
   } = inputs;
 
   if (heroCards.length !== 2) {
@@ -142,6 +145,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
     seats,
     heroSeatIndex,
     hitProbability,
+    asksForOuts: asksForOuts && hitProbability !== null,
     equity: {
       percent: equityResult.equity,
       standardError: equityResult.standardError,

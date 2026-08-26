@@ -31,12 +31,22 @@ export interface Settings {
   readonly playerCount: number;
   /** Seat index hero always occupies, or null to randomise each hand. */
   readonly fixedSeatIndex: number | null;
+  /**
+   * Ask hero to count the outs, rather than showing the number.
+   *
+   * On by default: counting outs is the mechanical skill that actually gets
+   * used at a table, and showing the count reduces the drill to arithmetic.
+   * Turn it off to drop back to three inputs per hand when five is too slow
+   * under a time trial.
+   */
+  readonly countOutsYourself: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   timePerHandSeconds: null,
   playerCount: 6,
   fixedSeatIndex: null,
+  countOutsYourself: true,
 });
 
 /** Time-trial choices: 5:00 down to 0:15 in 15-second steps. */
@@ -149,6 +159,12 @@ export interface HandTruth {
   readonly seats: readonly Seat[];
   readonly heroSeatIndex: number;
   readonly hitProbability: HitProbabilityTruth | null;
+  /**
+   * Whether hero was asked to count the outs themselves. A flow flag rather
+   * than a fact about the hand, kept here so `gradeHand(truth, input)` stays a
+   * two-argument pure function.
+   */
+  readonly asksForOuts: boolean;
   readonly equity: EquityTruth;
   readonly potOdds: PotOddsTruth;
   readonly action: ActionTruth;
@@ -160,6 +176,8 @@ export interface HandTruth {
 /* -------------------------------------------------------------------------- */
 
 export interface HandInput {
+  /** Hero's out count. Null when not asked. */
+  readonly outs: number | null;
   /** Hero's hit-probability estimate, percent. Null when not asked. */
   readonly hitProbability: number | null;
   /** Hero's equity estimate, percent. Null in Preflop mode. */
@@ -176,6 +194,7 @@ export const MISTAKE_CATEGORIES = [
   'EQUITY_OVER',
   'POT_ODDS_ARITHMETIC',
   'HIT_PROBABILITY',
+  'OUTS_MISCOUNT',
   'ACTION_TOO_PASSIVE',
   'ACTION_TOO_AGGRESSIVE',
   'ACTION_SHOULD_FOLD',
@@ -205,6 +224,7 @@ export interface ActionGrade {
 
 export interface HandGrade {
   readonly passed: boolean;
+  readonly outs: FieldGrade | null;
   readonly hitProbability: FieldGrade | null;
   readonly equity: FieldGrade | null;
   readonly potOdds: FieldGrade | null;
@@ -225,6 +245,17 @@ export interface HandGrade {
 export const EQUITY_TOLERANCE = 5;
 /** Pot odds is arithmetic, not estimation, so it is graded tighter. */
 export const POT_ODDS_TOLERANCE = 2;
+/**
+ * Outs are counted, not estimated, so the count must be exactly right.
+ *
+ * Hero may deliberately enter FEWER outs than this, having discounted soft ones
+ * — outs that improve the hand to something that still loses. That is a real
+ * and taught technique, but it belongs in the equity estimate, not here: this
+ * field grades the mechanical count. Feedback says so explicitly when hero
+ * undercounts.
+ */
+export const OUTS_TOLERANCE = 0;
+
 /**
  * Hit probability is graded against the exact probability alone, within this
  * band.

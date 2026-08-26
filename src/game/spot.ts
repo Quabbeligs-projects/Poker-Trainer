@@ -26,6 +26,7 @@ import {
   type Rng,
   shuffledDeckCodes,
 } from '../engine/deck';
+import { countOuts } from '../engine/outs';
 import { classifyCombo, narrowRange, type MadeClass } from '../engine/rangeNarrowing';
 import {
   type ChartPosition,
@@ -53,6 +54,29 @@ export const HAND_MIX_WEIGHTS: Readonly<Record<MadeClass, number>> = Object.free
 });
 
 const MAX_WEIGHT = Math.max(...Object.values(HAND_MIX_WEIGHTS));
+
+/**
+ * Out-count caps. A spot whose flop or turn exceeds these is never dealt.
+ *
+ * Two reasons, and the second matters more than the first.
+ *
+ * 1. The rule of 4 and 2 stops being accurate. The adjusted shortcut stays
+ *    within 3pp of exact up to 23 outs on the flop and 17 on the turn; past
+ *    those it breaches the grading band, so a correctly-applied shortcut could
+ *    be marked wrong.
+ *
+ * 2. Those hands are not a meaningful drill. A 22-out turn count is typically
+ *    padded with SOFT outs — 2h5d on 9c3s4d2c has 12 of its 22 outs going to
+ *    bottom two pair, which wins almost nothing. Counting them is technically
+ *    correct and practically useless.
+ *
+ * Measured over 2,000 generated spots: the flop cap rejects 0.00% (the flop
+ * never reaches 23 outs in practice) and the turn cap rejects 12.70%. The mix
+ * shifts by at most 2.2pp, on strongDraw, which is the class with the most
+ * outs. The hand-mix weights are deliberately NOT compensated for this.
+ */
+export const MAX_FLOP_OUTS = 23;
+export const MAX_TURN_OUTS = 17;
 
 /** Preflop raise size, in big blinds. */
 const OPEN_TO = BIG_BLIND * 3;
@@ -138,6 +162,10 @@ export function buildOutsSpot(
     ).madeClass;
     const weight = HAND_MIX_WEIGHTS[heroClass];
     if (weight <= 0) continue;
+    // Reject before the weighted draw, so the caps cost attempts rather than
+    // biasing which hands survive the weighting.
+    if (countOuts(heroCards, flop).total > MAX_FLOP_OUTS) continue;
+    if (countOuts(heroCards, [...flop, turnCard]).total > MAX_TURN_OUTS) continue;
     if (rng.next() < weight / MAX_WEIGHT) accepted = true;
   }
   if (!accepted) {
