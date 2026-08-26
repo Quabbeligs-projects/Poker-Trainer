@@ -14,7 +14,8 @@
     "generate:handstrength": "vite-node scripts/generateHandStrength.mjs",
     "sanity": "vite-node scripts/solverSanity.mjs",
     "icons": "node scripts/generateIcons.mjs",
-    "verify:pwa": "node scripts/verifyPwa.mjs"
+    "verify:pwa": "node scripts/verifyPwa.mjs",
+    "calibrate": "vite-node scripts/calibration.mjs"
   },
   "dependencies": {
     "phe": "^0.6.0",

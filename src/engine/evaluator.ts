@@ -118,6 +118,17 @@ function categoryIndexFromPheValue(value: number): number {
   return 8; // Straight Flush
 }
 
+/**
+ * Hand category from a normalised strength (higher is better).
+ *
+ * Exported because the Monte Carlo loop needs to bucket hero's finished hand by
+ * category on every iteration, and must not pay for a full `evaluate()` to do
+ * it. This is a handful of integer comparisons.
+ */
+export function categoryOfStrength(strength: number): number {
+  return categoryIndexFromPheValue(MAX_STRENGTH + 1 - strength);
+}
+
 /** All C(7,5) = 21 five-card subsets of a seven-card hand, as index triples. */
 const SUBSETS_7_CHOOSE_5: readonly (readonly number[])[] = (() => {
   const out: number[][] = [];

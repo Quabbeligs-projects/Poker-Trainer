@@ -35,6 +35,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 npm test            # 217 tests, ~18s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
+npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
 npm run icons       # regenerate the PWA icons
 npm run build       # typecheck + production build
 npm run verify:pwa  # build must work offline in a real browser
@@ -314,6 +315,74 @@ uncontroversial and prints the full verdict plus `firedRules`. It is a
 judgement harness, not a test: it exists so a human can read the solver's
 reasoning and disagree with it. Two real modelling defects were found this way —
 see the narrowing section above on bet-size intensity.
+
+## Calibration: engine equity vs counting outs
+
+`npm run calibrate` compares engine truth against what a player computes at the
+table, over 600 spots (300 flops, each carried to the turn).
+
+```
+FLOP   mean signed gap  +3.2pp   sd 20.3pp   74% outside +/-5pp
+TURN   mean signed gap +13.1pp   sd 26.2pp   68% outside +/-5pp
+```
+
+**The small mean is an artefact — two large opposite biases cancelling.** By
+hand type:
+
+```
+hand type      n    mean gap    outs   naive   engine   as-is  improved
+monster       10    +88.5pp      0.4     1.0    89.5    88.5     1.1
+strong        68    +55.3pp      6.1    15.7    71.0    54.8    16.2
+overpair       9    +32.8pp     13.2    38.7    71.5    38.2    33.3
+topPair       28    +24.6pp     13.3    39.7    64.4    32.8    31.6
+weakPair     218     +1.4pp     11.0    30.5    32.0    11.4    20.6
+weakDraw      73     +1.1pp      8.9    24.8    25.9     4.3    21.6
+nothing      161     -5.4pp      6.0    20.3    14.9     2.0    13.0
+strongDraw    33     -8.2pp     13.6    41.0    32.7     2.0    30.8
+```
+
+Made hands are massively understated by outs counting (all their equity is
+already-ahead equity, which counting outs cannot see); big draws are overstated
+(outs are not clean, and the opponent redraws).
+
+**The rule of 4 is not the problem.** Splitting the gap:
+
+```
+rule-of-4 arithmetic error      mean +0.4pp  sd  1.8
+ignoring the opponent's range   mean +7.8pp  sd 23.8
+```
+
+The shortcut's arithmetic is nearly exact. The entire error is that outs
+counting answers a different question from the one the engine answers.
+
+**Restricting to genuine drawing spots helps but does not fix it:** 177 of 600
+spots qualify, mean gap -4.2pp, sd 9.5pp, still 64% outside +/-5pp.
+
+**Widening the tolerance is not viable**, which is why it was rejected:
+
+```
+all spots           to pass 90% needs +/-52pp
+drawing spots only  to pass 90% needs +/-18pp
+```
+
+### Equity decomposition
+
+The truth object now carries an `EquityBreakdown` splitting equity into `asIs`
+(won without improving) and `improved` (won after improving), plus equity and
+frequency per finishing category. The two parts sum exactly to the total. It is
+present only on a flop or turn board — preflop there is no hand to improve on,
+and on the river nothing can change.
+
+This is what lets feedback say "16 points from making the flush, 15 from
+ace-high being good when he misses" instead of a bare 31%.
+
+### Outs
+
+`countOuts` defines an out as a card that improves HERO's hand specifically,
+measured against a benchmark: the best hand a player holding two blanks could
+make on the same board, minimised over every possible pair of blanks. Without
+that benchmark, any card pairing the board counts as an out — a nut flush draw
+scores 23 outs and the rule of 4 claims 92%.
 
 ## Still to build
 

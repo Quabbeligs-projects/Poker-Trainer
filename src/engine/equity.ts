@@ -27,7 +27,12 @@
  */
 
 import { type CardCode, DECK_SIZE, type Rng } from './deck';
-import { evaluator } from './evaluator';
+import {
+  HAND_CATEGORIES,
+  type HandCategory,
+  categoryOfStrength,
+  evaluator,
+} from './evaluator';
 import { type Range, RangeSampler, comboHigh, comboLow } from './ranges';
 
 /** Default iteration count. Measured at well under 100ms for heads-up. */
@@ -56,6 +61,39 @@ export interface EquityOptions {
   readonly maxIterations?: number;
 }
 
+/**
+ * Where hero's equity comes from.
+ *
+ * A bare "31%" teaches nothing: the player cannot tell whether that is a draw
+ * that gets there, or a hand that is already ahead of the opponent's air. The
+ * split lets feedback say "16 points from making the flush, 15 from ace-high
+ * being good when he misses", which is the actual lesson.
+ *
+ * `asIs` and `improved` partition hero's equity exactly: they sum to `equity`.
+ * "Improved" means hero's hand CATEGORY at showdown is higher than it was on
+ * the visible board. Note the board can improve hero without hero hitting an
+ * out — a fourth heart giving hero a flush hero was not drawing to counts as
+ * improvement, which is correct, if not always what "I hit my draw" means.
+ */
+export interface EquityBreakdown {
+  /** Hero's category on the visible board, before any further cards. */
+  readonly currentCategory: HandCategory;
+  /** Equity, in percentage points, won WITHOUT the category improving. */
+  readonly asIs: number;
+  /** Equity, in percentage points, won after the category improved. */
+  readonly improved: number;
+  /** Fraction of runouts where hero's category improved, won or not. */
+  readonly improvementRate: number;
+  /** Equity contributed by each finishing category, strongest first. */
+  readonly byFinalCategory: ReadonlyArray<{
+    readonly category: HandCategory;
+    /** Percentage points of equity contributed. */
+    readonly equity: number;
+    /** Fraction of runouts finishing in this category. */
+    readonly frequency: number;
+  }>;
+}
+
 export interface EquityResult {
   /** Hero's equity as a percentage, `0..100`. */
   readonly equity: number;
@@ -75,6 +113,12 @@ export interface EquityResult {
   readonly hitIterationCeiling: boolean;
   /** Milliseconds spent in the sampling loop. */
   readonly elapsedMs: number;
+  /**
+   * Where the equity came from. Present only with a visible board of 3 or 4
+   * cards: preflop there is no hand yet to improve on, and on the river nothing
+   * can change.
+   */
+  readonly breakdown: EquityBreakdown | null;
 }
 
 /** Running totals, so an auto-raised run can extend rather than restart. */
@@ -85,6 +129,17 @@ interface Accumulator {
   ties: number;
   losses: number;
   iterations: number;
+  /** Hero's category on the visible board, or -1 when not tracked. */
+  currentCategoryIndex: number;
+  /** Equity won without the category improving. */
+  asIsScore: number;
+  /** Equity won after improving. */
+  improvedScore: number;
+  /** Runouts where the category improved. */
+  improvedCount: number;
+  /** Equity and frequency per finishing category. */
+  categoryScore: Float64Array;
+  categoryCount: Float64Array;
 }
 
 function standardErrorOf(acc: Accumulator): number {
@@ -153,6 +208,13 @@ export function computeEquity(options: EquityOptions): EquityResult {
     return { sampler: new RangeSampler(filtered), range: filtered };
   });
 
+  // Hero's category is only meaningful once there is a board to make a hand on,
+  // and only interesting while cards are still to come.
+  const trackBreakdown = board.length === 3 || board.length === 4;
+  const currentCategoryIndex = trackBreakdown
+    ? categoryOfStrength(evaluator.strengthOfCodes([...hole, ...board]))
+    : -1;
+
   const acc: Accumulator = {
     scoreSum: 0,
     scoreSquaredSum: 0,
@@ -160,6 +222,12 @@ export function computeEquity(options: EquityOptions): EquityResult {
     ties: 0,
     losses: 0,
     iterations: 0,
+    currentCategoryIndex,
+    asIsScore: 0,
+    improvedScore: 0,
+    improvedCount: 0,
+    categoryScore: new Float64Array(HAND_CATEGORIES.length),
+    categoryCount: new Float64Array(HAND_CATEGORIES.length),
   };
 
   const started = Date.now();
@@ -189,6 +257,28 @@ export function computeEquity(options: EquityOptions): EquityResult {
   const elapsedMs = Date.now() - started;
 
   const equityFraction = acc.scoreSum / acc.iterations;
+
+  let breakdown: EquityBreakdown | null = null;
+  if (trackBreakdown) {
+    const byFinalCategory = [];
+    for (let i = HAND_CATEGORIES.length - 1; i >= 0; i--) {
+      const count = acc.categoryCount[i] as number;
+      if (count === 0) continue;
+      byFinalCategory.push({
+        category: HAND_CATEGORIES[i] as HandCategory,
+        equity: ((acc.categoryScore[i] as number) / acc.iterations) * 100,
+        frequency: count / acc.iterations,
+      });
+    }
+    breakdown = {
+      currentCategory: HAND_CATEGORIES[currentCategoryIndex] as HandCategory,
+      asIs: (acc.asIsScore / acc.iterations) * 100,
+      improved: (acc.improvedScore / acc.iterations) * 100,
+      improvementRate: acc.improvedCount / acc.iterations,
+      byFinalCategory,
+    };
+  }
+
   return {
     equity: equityFraction * 100,
     equityFraction,
@@ -199,6 +289,7 @@ export function computeEquity(options: EquityOptions): EquityResult {
     standardError: standardErrorOf(acc),
     hitIterationCeiling,
     elapsedMs,
+    breakdown,
   };
 }
 
@@ -320,6 +411,20 @@ function runIterations(
     }
     acc.scoreSum += score;
     acc.scoreSquaredSum += score * score;
+
+    // Attribute the equity. `categoryOfStrength` is a handful of integer
+    // comparisons, so this costs almost nothing per iteration.
+    if (acc.currentCategoryIndex >= 0) {
+      const finalCategory = categoryOfStrength(heroStrength);
+      acc.categoryScore[finalCategory] = (acc.categoryScore[finalCategory] as number) + score;
+      acc.categoryCount[finalCategory] = (acc.categoryCount[finalCategory] as number) + 1;
+      if (finalCategory > acc.currentCategoryIndex) {
+        acc.improvedScore += score;
+        acc.improvedCount += 1;
+      } else {
+        acc.asIsScore += score;
+      }
+    }
 
     // Release the dealt board cards for the next iteration.
     for (let i = 0; i < boardToDeal; i++) used[fullBoard[board.length + i] as number] = 0;
