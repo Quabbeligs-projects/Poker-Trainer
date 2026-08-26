@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 274 tests, ~25s
+npm test            # 281 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -403,19 +403,52 @@ inputs, and that repeated grading returns identical verdicts.
 
 | field | tolerance | why |
 |---|---|---|
-| hit probability | ±2pp of **either** anchor | see below |
+| hit probability | ±3pp of the exact value | see below |
 | equity | ±5pp | an estimate, per the spec |
 | pot odds | ±2pp | arithmetic, not estimation |
 | action | in the solver's accepted set | multiple actions can be right |
 
-Hit probability is graded against **two anchors** — the exact probability and
-the rule-of-4-and-2 value — each within ±2pp. The shortcut's error is not noise
-but a deterministic function of the out count: at 15 outs on the flop it reads
-60% against a true 54.1%. Grading against the shortcut alone would mark the
-*correct* answer wrong; grading against the exact figure alone would mark a
-correctly-applied shortcut wrong. Both are right answers to the question asked.
-A single fixed band would have to be ±6pp on the flop to cover 1–15 outs, which
-is far looser than either anchor needs.
+Hit probability is graded against the **exact** probability alone, in a single
+±3pp band, on both streets.
+
+An earlier design used two anchors — exact and the rule of 4 and 2 — each within
+±2pp, because the *plain* shortcut diverges from exact by up to 5.9pp at 15
+outs. That was wrong twice over:
+
+- **It left a hole.** Two ±2pp bands around anchors 4.8pp apart accept 49–53 and
+  54–58, so 53.5 failed while 53 and 54 both passed. A value sitting between two
+  accepted answers cannot be graded wrong. A test now asserts the accepted set
+  is one contiguous interval.
+- **It solved a problem the calibration invented.** The baseline was plain
+  `outs × 4`. The method players actually use subtracts the excess over eight
+  outs, and it is far more accurate:
+
+```
+outs   exact   plain x4   adjusted   adjusted error
+   9   35.0%      36         35          +0.0pp
+  12   45.0%      48         44          -1.0pp
+  14   51.2%      56         50          -1.2pp
+  15   54.1%      60         53          -1.1pp
+```
+
+Across 1–15 outs the worst error is **−1.16pp on the flop (14 outs)** and
+**−2.61pp on the turn (15 outs)**, so a single ±3pp band around exact accepts a
+correctly-applied shortcut with room to spare. Switching the calibration to the
+adjusted estimator halves the arithmetic error's spread (sd 1.8 → 0.9) and left
+the range-blindness figure **exactly unchanged at +7.8pp, sd 23.8** — as it must,
+since that term is measured against exact enumeration rather than any shortcut.
+The two-field design rests on a number no estimator choice can move.
+
+**Where the band stops holding.** The ±3pp band covers 1–15 outs comfortably,
+but the shortcut breaches it at **18+ outs on the turn** and **24+ outs on the
+flop**, and those counts do occur: measured over 1,500 generated spots, 12.4% of
+turn spots have more than 17 outs (max 28). Those are legitimate counts, not an
+over-count — a hand like `2h5d` on `9c3s4d2c` genuinely has 22 improving cards
+(wheel draw 8, two-pair outs 12, trips 2), each verified against the blank
+benchmark. On such a spot a correctly-applied `×2` can be graded wrong. Widening
+the turn band to ±4pp would cover to 21 outs, ±5pp to 28. Left at ±3pp
+deliberately rather than widened silently; the thresholds are asserted in
+`test/outs.test.ts` so any change to either rule shows up.
 
 ### Hand mix
 

@@ -68,35 +68,16 @@ function gradeNumeric(
 }
 
 /**
- * Grades the hit-probability answer against BOTH anchors.
+ * Grades the hit-probability answer against the exact probability.
  *
- * The rule of 4 and 2 is a deterministic approximation whose error grows with
- * the out count: at 15 outs on the flop it reads 60% against a true 54.1%.
- * Grading only against the shortcut would fail a player who knows the exact
- * figure; grading only against the exact figure would fail a player who applied
- * the shortcut correctly. Both are right answers to the question asked, so both
- * are accepted. `truth` reports the exact value, which is what the error is
- * measured against for statistics.
+ * A single anchor and a single band. The adjusted rule of 4 and 2 that players
+ * actually apply lands within 1.2pp of exact across 1-15 outs, so a 3pp band
+ * accepts a correctly-applied shortcut without needing a second anchor — and
+ * without the gap two narrow bands would leave between them.
  */
 function gradeHitProbability(truth: HandTruth, given: number | null): FieldGrade | null {
   if (truth.hitProbability === null) return null;
-  const { exact, ruleOfThumb } = truth.hitProbability;
-  if (given === null) {
-    return {
-      correct: false, given: null, truth: exact, error: null,
-      tolerance: HIT_PROBABILITY_TOLERANCE,
-    };
-  }
-  const correct =
-    Math.abs(given - exact) <= HIT_PROBABILITY_TOLERANCE + 1e-9
-    || Math.abs(given - ruleOfThumb) <= HIT_PROBABILITY_TOLERANCE + 1e-9;
-  return {
-    correct,
-    given,
-    truth: exact,
-    error: given - exact,
-    tolerance: HIT_PROBABILITY_TOLERANCE,
-  };
+  return gradeNumeric(given, truth.hitProbability.exact, HIT_PROBABILITY_TOLERANCE);
 }
 
 function gradeAction(truth: HandTruth, given: HandInput['action']): ActionGrade {

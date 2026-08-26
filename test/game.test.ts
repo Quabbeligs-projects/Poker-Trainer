@@ -235,29 +235,66 @@ describe('grading', () => {
     expect(grade.mistakes).toContain('EQUITY_OVER');
   });
 
-  it('accepts hit probability at EITHER anchor', () => {
-    // The rule of 4 and 2 and the exact figure are both right answers to the
-    // question asked; grading against one alone would fail the other.
+  it('grades hit probability against a single band around the exact value', () => {
     const truth = truthFor('anchors');
-    const { exact, ruleOfThumb } = truth.hitProbability!;
-    for (const answer of [exact, ruleOfThumb]) {
-      const grade = gradeHand(truth, {
+    const { exact } = truth.hitProbability!;
+    const grade = (answer: number) => gradeHand(truth, {
+      hitProbability: answer,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    }).hitProbability!;
+    expect(grade(exact).correct).toBe(true);
+    expect(grade(exact + HIT_PROBABILITY_TOLERANCE - 0.01).correct).toBe(true);
+    expect(grade(exact - HIT_PROBABILITY_TOLERANCE + 0.01).correct).toBe(true);
+    expect(grade(exact + HIT_PROBABILITY_TOLERANCE + 0.5).correct).toBe(false);
+    expect(grade(exact - HIT_PROBABILITY_TOLERANCE - 0.5).correct).toBe(false);
+  });
+
+  it('accepts a correctly applied shortcut, which is the point of the band', () => {
+    const truth = truthFor('shortcut');
+    const grade = gradeHand(truth, {
+      hitProbability: truth.hitProbability!.ruleOfThumb,
+      equity: truth.equity.percent,
+      potOdds: truth.potOdds.percent,
+      action: truth.action.best,
+      timedOut: false,
+    });
+    // Only guaranteed where the shortcut is defined to be accurate; the turn
+    // above 17 outs is a documented exception.
+    const { outs, cardsToCome } = truth.hitProbability!;
+    if (cardsToCome === 2 || outs <= 15) {
+      expect(grade.hitProbability!.correct).toBe(true);
+    }
+  });
+
+  it('leaves no gap: the accepted set is one contiguous interval', () => {
+    // The earlier two-anchor scheme accepted 49-53 and 54-58 at 14 outs, so
+    // 53.5 failed while 53 and 54 both passed. A value between two accepted
+    // answers must never be graded wrong.
+    const truth = truthFor('no-gap');
+    const accepted: number[] = [];
+    for (let answer = 0; answer <= 100; answer += 0.25) {
+      const correct = gradeHand(truth, {
         hitProbability: answer,
         equity: truth.equity.percent,
         potOdds: truth.potOdds.percent,
         action: truth.action.best,
         timedOut: false,
-      });
-      expect(grade.hitProbability!.correct, `answer ${answer}`).toBe(true);
+      }).hitProbability!.correct;
+      if (correct) accepted.push(answer);
+    }
+    expect(accepted.length).toBeGreaterThan(0);
+    for (let i = 1; i < accepted.length; i++) {
+      expect(accepted[i]! - accepted[i - 1]!).toBeCloseTo(0.25, 9);
     }
   });
 
-  it('rejects a hit probability outside both anchors', () => {
+  it('rejects a hit probability well outside the band', () => {
     const truth = truthFor('anchors-miss');
-    const { exact, ruleOfThumb } = truth.hitProbability!;
-    const wild = Math.max(exact, ruleOfThumb) + 20;
     const grade = gradeHand(truth, {
-      hitProbability: wild,
+      hitProbability: truth.hitProbability!.exact + 20,
       equity: truth.equity.percent,
       potOdds: truth.potOdds.percent,
       action: truth.action.best,

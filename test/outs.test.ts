@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { codesFromStrings, createRng } from '../src/engine/deck';
-import { countOuts, exactHitProbability, ruleOfFourAndTwo } from '../src/engine/outs';
+import {
+  adjustedRuleOfThumb,
+  countOuts,
+  exactHitProbability,
+  ruleOfFourAndTwo,
+} from '../src/engine/outs';
 import { computeEquity } from '../src/engine/equity';
 import { Range } from '../src/engine/ranges';
 
@@ -129,6 +134,69 @@ describe('the rule of 4 and 2', () => {
   it('rejects impossible street counts', () => {
     expect(() => ruleOfFourAndTwo(9, 0)).toThrow();
     expect(() => ruleOfFourAndTwo(9, 3)).toThrow();
+  });
+});
+
+describe('the adjusted rule of 4 and 2 — what players actually use', () => {
+  it('subtracts the excess over eight outs on the flop', () => {
+    expect(adjustedRuleOfThumb(8, 2)).toBe(32);   // no adjustment at or below 8
+    expect(adjustedRuleOfThumb(9, 2)).toBe(35);   // 36 - 1
+    expect(adjustedRuleOfThumb(12, 2)).toBe(44);  // 48 - 4
+    expect(adjustedRuleOfThumb(14, 2)).toBe(50);  // 56 - 6
+    expect(adjustedRuleOfThumb(15, 2)).toBe(53);  // 60 - 7
+  });
+
+  it('leaves the turn as plain x2', () => {
+    for (const outs of [1, 8, 9, 15]) {
+      expect(adjustedRuleOfThumb(outs, 1)).toBe(outs * 2);
+    }
+  });
+
+  it('stays within the grading band across every realistic out count', () => {
+    // This is the property the +/-3pp single band depends on: a correctly
+    // applied shortcut must never be marked wrong.
+    let worstFlop = 0;
+    let worstTurn = 0;
+    for (let outs = 1; outs <= 15; outs++) {
+      const flopError = adjustedRuleOfThumb(outs, 2) - exactHitProbability(outs, 2, 47);
+      const turnError = adjustedRuleOfThumb(outs, 1) - exactHitProbability(outs, 1, 46);
+      if (Math.abs(flopError) > Math.abs(worstFlop)) worstFlop = flopError;
+      if (Math.abs(turnError) > Math.abs(worstTurn)) worstTurn = turnError;
+    }
+    expect(Math.abs(worstFlop)).toBeLessThan(3);
+    expect(Math.abs(worstTurn)).toBeLessThan(3);
+    // Recorded so a regression is visible rather than merely under the bar.
+    expect(worstFlop).toBeCloseTo(-1.16, 1);
+    expect(worstTurn).toBeCloseTo(-2.61, 1);
+  });
+
+  it('is dramatically tighter than the plain shortcut where it matters', () => {
+    // The plain shortcut's 5.9pp divergence at 15 outs is what made a
+    // two-anchor grading scheme look necessary. It is an artefact of the
+    // unadjusted rule.
+    for (const outs of [12, 14, 15]) {
+      const exact = exactHitProbability(outs, 2, 47);
+      const plainError = Math.abs(ruleOfFourAndTwo(outs, 2) - exact);
+      const adjustedError = Math.abs(adjustedRuleOfThumb(outs, 2) - exact);
+      expect(adjustedError).toBeLessThan(plainError / 2);
+    }
+  });
+
+  it('records exactly where the band stops holding', () => {
+    // Documented rather than silently tolerated. On the turn, x2 implicitly
+    // assumes 50 unseen cards rather than 46, so its error grows steadily with
+    // the out count. On the flop the adjustment overcorrects at extreme counts.
+    // Both thresholds are asserted so a change to either rule is visible.
+    const firstBreach = (cardsToCome: 1 | 2, unseen: number) => {
+      for (let outs = 1; outs <= 40; outs++) {
+        const error = adjustedRuleOfThumb(outs, cardsToCome)
+          - exactHitProbability(outs, cardsToCome, unseen);
+        if (Math.abs(error) > 3) return outs;
+      }
+      return null;
+    };
+    expect(firstBreach(2, 47)).toBe(24); // flop
+    expect(firstBreach(1, 46)).toBe(18); // turn
   });
 });
 

@@ -16,7 +16,7 @@ import rangesJson from '../src/data/ranges.json' with { type: 'json' };
 import { RangeCharts } from '../src/engine/ranges.ts';
 import { codesFromStrings, createRng, shuffledDeckCodes, codeToString } from '../src/engine/deck.ts';
 import { computeEquity } from '../src/engine/equity.ts';
-import { countOuts, ruleOfFourAndTwo, exactHitProbability } from '../src/engine/outs.ts';
+import { countOuts, ruleOfFourAndTwo, adjustedRuleOfThumb, exactHitProbability } from '../src/engine/outs.ts';
 import { narrowRange, classifyCombo } from '../src/engine/rangeNarrowing.ts';
 
 const charts = new RangeCharts(rangesJson);
@@ -66,7 +66,11 @@ for (let i = 0; i < SPOTS; i++) {
     });
 
     const outs = countOuts(hole, board);
-    const naive = ruleOfFourAndTwo(outs.total, cardsToCome);
+    // The estimator players actually use: x4 minus the excess over 8 outs on
+    // the flop. `plain` is kept so the report can separate how much of the gap
+    // is the shortcut's arithmetic from how much is range-blindness.
+    const naive = adjustedRuleOfThumb(outs.total, cardsToCome);
+    const plain = ruleOfFourAndTwo(outs.total, cardsToCome);
     const exactHit = exactHitProbability(outs.total, cardsToCome, outs.unseen);
     const handClass = classifyCombo(hole[0], hole[1], board).madeClass;
 
@@ -78,6 +82,7 @@ for (let i = 0; i < SPOTS; i++) {
       villain: `${villain.chart} bets ${Math.round(villain.betFraction * 100)}%`,
       outs: outs.total,
       naive,
+      plain,
       exactHit,
       engine: result.equity,
       gap: result.equity - naive,
@@ -200,11 +205,17 @@ for (const [label, subset] of [['all spots', rows], ['drawing spots only', drawi
 
 // How much of the gap is arithmetic (rule of 4 vs exact hit probability) versus
 // modelling (ignoring the opponent's range entirely)?
-const arithmetic = stats(rows.map((r) => r.exactHit - r.naive));
+const adjustedArithmetic = stats(rows.map((r) => r.exactHit - r.naive));
+const plainArithmetic = stats(rows.map((r) => r.exactHit - r.plain));
 const modelling = stats(rows.map((r) => r.engine - r.exactHit));
 console.log(`\n${line()}`);
 console.log('WHERE THE GAP COMES FROM');
 console.log(line());
-console.log(`  rule-of-4 arithmetic error      mean ${f(arithmetic.mean)}pp  sd ${arithmetic.sd.toFixed(1)}`);
-console.log(`  ignoring the opponent's range   mean ${f(modelling.mean)}pp  sd ${modelling.sd.toFixed(1)}`);
+console.log(`  plain x4/x2 arithmetic error     mean ${f(plainArithmetic.mean)}pp  sd ${plainArithmetic.sd.toFixed(1)}`);
+console.log(`  ADJUSTED shortcut error          mean ${f(adjustedArithmetic.mean)}pp  sd ${adjustedArithmetic.sd.toFixed(1)}`);
+console.log(`  ignoring the opponent's range    mean ${f(modelling.mean)}pp  sd ${modelling.sd.toFixed(1)}`);
+console.log('');
+console.log('  The range-blindness figure is measured against EXACT enumeration,');
+console.log('  not against any shortcut, so changing the estimator cannot move it.');
+console.log('  It is reported here to confirm that invariance holds numerically.');
 console.log('');

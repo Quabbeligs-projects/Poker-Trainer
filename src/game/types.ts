@@ -77,18 +77,15 @@ export interface Seat {
 /**
  * What the player is asked for, and what the engine says the answer is.
  *
- * `hitProbability` is graded against two anchors. The rule of 4 and 2 is a
- * deterministic approximation whose error grows with the out count — at 15 outs
- * on the flop it reads 60% against a true 54.1% — so grading against the
- * shortcut alone would mark the CORRECT answer wrong, and grading against the
- * exact figure alone would mark a correctly-applied shortcut wrong. Both are
- * accepted, each within a tight band.
+ * `hitProbability` is graded against `exact` alone, within
+ * `HIT_PROBABILITY_TOLERANCE`. `ruleOfThumb` carries the adjusted shortcut for
+ * display, so feedback can show both figures side by side.
  */
 export interface HitProbabilityTruth {
   readonly outs: number;
   /** Exact probability of hitting at least one out. */
   readonly exact: number;
-  /** What the rule of 4 and 2 gives for this out count. */
+  /** The adjusted rule of 4 and 2 for this out count, for display. */
   readonly ruleOfThumb: number;
   /** Cards still to come: 2 on the flop, 1 on the turn. */
   readonly cardsToCome: number;
@@ -229,7 +226,18 @@ export const EQUITY_TOLERANCE = 5;
 /** Pot odds is arithmetic, not estimation, so it is graded tighter. */
 export const POT_ODDS_TOLERANCE = 2;
 /**
- * Hit probability is graded against two anchors, each within this band: the
- * exact probability, and the rule of 4 and 2. See `HitProbabilityTruth`.
+ * Hit probability is graded against the exact probability alone, within this
+ * band.
+ *
+ * An earlier design accepted two anchors — the exact figure and the rule of 4
+ * and 2 — each within 2pp, because the plain shortcut diverges from exact by up
+ * to 5.9pp at 15 outs. That was wrong twice over. It left a HOLE: two 2pp bands
+ * around anchors 4.8pp apart accept 49-53 and 54-58, so 53.5 fails while 53 and
+ * 54 both pass, and a value between two accepted answers cannot be graded
+ * wrong. And it was solving a problem the calibration invented by using the
+ * UNADJUSTED shortcut as its baseline. With the adjustment players actually
+ * apply (x4 minus the excess over 8 outs), the shortcut sits within 1.2pp of
+ * exact across 1-15 outs, so a single band around the exact value covers a
+ * correctly-applied shortcut with room to spare.
  */
-export const HIT_PROBABILITY_TOLERANCE = 2;
+export const HIT_PROBABILITY_TOLERANCE = 3;

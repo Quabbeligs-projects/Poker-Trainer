@@ -18,7 +18,7 @@
 import { cardFromCode, type CardCode, type Rng } from '../engine/deck';
 import { HAND_CATEGORIES, categoryOfStrength, evaluator } from '../engine/evaluator';
 import { computeEquity, DEFAULT_ITERATIONS } from '../engine/equity';
-import { countOuts, exactHitProbability, ruleOfFourAndTwo } from '../engine/outs';
+import { adjustedRuleOfThumb, countOuts, exactHitProbability } from '../engine/outs';
 import { potOdds } from '../engine/potOdds';
 import { priceAction, solveAction } from '../engine/actionSolver';
 import { classifyCombo, splitByFoldDecision } from '../engine/rangeNarrowing';
@@ -98,7 +98,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
         return {
           outs: outs.total,
           exact: exactHitProbability(outs.total, cardsToCome, outs.unseen),
-          ruleOfThumb: ruleOfFourAndTwo(outs.total, cardsToCome),
+          ruleOfThumb: adjustedRuleOfThumb(outs.total, cardsToCome),
           cardsToCome,
         };
       })()

@@ -148,17 +148,46 @@ function blankBenchmark(
 }
 
 /**
- * The rule of 4 and 2: the estimate a player makes at the table.
+ * The unadjusted rule of 4 and 2: `outs x 4` with two cards to come, `outs x 2`
+ * with one.
  *
- * `outs x 4` with two cards to come, `outs x 2` with one. This is the naive
- * baseline the trainer is calibrated against, not something the engine uses to
- * decide anything.
+ * Kept for the calibration report, which measures how much the shortcut's
+ * arithmetic contributes to the gap against engine truth. It is NOT what the
+ * trainer grades against — see `adjustedRuleOfThumb`, which is the method
+ * players actually use and is dramatically more accurate.
  */
 export function ruleOfFourAndTwo(outs: number, cardsToCome: number): number {
   if (cardsToCome !== 1 && cardsToCome !== 2) {
     throw new Error(`Cards to come must be 1 or 2, received ${cardsToCome}`);
   }
   return Math.min(100, outs * (cardsToCome === 2 ? 4 : 2));
+}
+
+/**
+ * The rule of 4 and 2 as it is actually taught and used: with two cards to
+ * come, multiply by four and then subtract the excess over eight outs.
+ *
+ * The plain shortcut drifts badly at high out counts because it double-counts
+ * runouts that hit on both cards — at 15 outs it reads 60% against a true
+ * 54.1%. The adjustment corrects almost exactly for that:
+ *
+ *     outs   exact   plain x4   adjusted   error
+ *        9   35.0%      36         35      +0.0pp
+ *       12   45.0%      48         44      -1.0pp
+ *       14   51.2%      56         50      -1.2pp
+ *       15   54.1%      60         53      -1.1pp
+ *
+ * Across 1-15 outs the worst flop error is -1.2pp. On the turn no adjustment
+ * applies and `outs x 2` is used unchanged; its error grows with the out count
+ * (-2.6pp at 15 outs) because x2 implicitly assumes 50 unseen cards rather than
+ * the actual 46. See the note in README about out counts above 17 on the turn.
+ */
+export function adjustedRuleOfThumb(outs: number, cardsToCome: number): number {
+  if (cardsToCome !== 1 && cardsToCome !== 2) {
+    throw new Error(`Cards to come must be 1 or 2, received ${cardsToCome}`);
+  }
+  if (cardsToCome === 1) return Math.min(100, outs * 2);
+  return Math.min(100, outs * 4 - Math.max(0, outs - 8));
 }
 
 /**
