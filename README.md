@@ -293,18 +293,16 @@ link falls back to the app shell offline.
 **What can and cannot fail the build.** Only checks proving the app *functions*
 offline are blocking: the service worker controls the page, a precached asset
 resolves with the network cut, a never-cached URL does *not* resolve (proving
-the network really was cut rather than the test quietly running online), and the
-engine computes correct equities. Cosmetic checks — currently the connectivity
-label — report as warnings and cannot block a deploy.
+the network really was cut rather than the test quietly running online), the
+engine deals a hand, and the form advances. Cosmetic checks report as warnings
+and cannot block a deploy.
 
-That split exists because a CI run failed on the connectivity label alone while
-every functional check passed. `navigator.onLine` reports only whether a network
-interface exists, and under emulated offline mode it may not flip at all. A
-label being wrong is not a reason to withhold a deploy whose engine
-demonstrably works offline.
-
-Set `VERIFY_PWA_SIMULATE_STALE_ONLINE=1` to reproduce that environment and
-confirm it still exits 0.
+That split exists because a CI run once failed on a connectivity label alone
+while every functional check passed. `navigator.onLine` reports only whether a
+network interface exists, and under emulated offline mode it may not flip at
+all. A label being wrong is not a reason to withhold a deploy whose engine
+demonstrably works offline. That label is gone with the engine-check page, but
+the split remains.
 
 That verifies everything verifiable without an iOS device. Installing from the
 Pages URL on an actual iPhone is the one step that needs your hardware.

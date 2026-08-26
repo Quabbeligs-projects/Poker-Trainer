@@ -12,10 +12,9 @@
  * the test quietly running online), and the engine computes correct equities
  * from the precache.
  *
- * Cosmetic checks — currently the connectivity chip — report as warnings and
- * cannot fail the build. `navigator.onLine` reports only whether a network
- * interface exists; under Playwright's emulated offline mode it may not flip
- * at all, and a label being wrong is not a reason to block a deploy whose
+ * Cosmetic checks report as warnings and cannot fail the build. The
+ * connectivity label that once lived here is gone with the engine-check page,
+ * but the split is kept: a cosmetic defect must never block a deploy whose
  * engine demonstrably works offline.
  *
  *   npm run verify:pwa
@@ -93,17 +92,6 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 
-// Reproduces the CI failure this check was hardened against: an environment
-// where navigator.onLine never reports offline. Setting
-// VERIFY_PWA_SIMULATE_STALE_ONLINE=1 must produce a WARNING and a passing exit
-// code, never a build failure.
-if (process.env.VERIFY_PWA_SIMULATE_STALE_ONLINE === '1') {
-  console.log('  (simulating an environment where navigator.onLine never flips)');
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'onLine', { get: () => true, configurable: true });
-  });
-}
-
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
@@ -179,12 +167,20 @@ cached.total >= 5
   : fail(`only ${cached.total} entries precached`);
 
 // --- 6. The engine runs ----------------------------------------------------
-await page.getByRole('button', { name: /run benchmarks/i }).click();
-await page.waitForSelector('table tbody tr td.good, table tbody tr td.bad', { timeout: 60_000 });
-const verdict = await page.locator('.verdict').first().innerText();
-verdict.includes('within tolerance')
-  ? pass(`engine online: ${verdict}`)
-  : fail(`engine verdict: ${verdict}`);
+// Rendering a hand exercises the whole engine: a spot is built, ranges are
+// narrowed, and a 100k-iteration Monte Carlo produces the truth object. If any
+// of that fails there is no question on screen.
+const handRendered = async () => {
+  await page.waitForSelector('.ask h2', { timeout: 60_000 });
+  return {
+    cards: await page.locator('.table-strip .card').count(),
+    question: await page.locator('.ask h2').innerText(),
+  };
+};
+const online = await handRendered();
+online.cards >= 5
+  ? pass(`engine online: dealt a hand (${online.cards} cards, asked "${online.question}")`)
+  : fail(`engine online: only ${online.cards} cards rendered`);
 
 // --- 7. OFFLINE: the real test --------------------------------------------
 await context.setOffline(true);
@@ -236,30 +232,21 @@ if (reloaded) {
          + 'so this run proves nothing about offline behaviour')
     : pass('never-cached URL correctly unreachable (network really is cut)');
 
-  // Cosmetic: the connectivity label. Waited for rather than read instantly, and
-  // never fatal — see the note at the top of this file.
-  const chipText = await waitFor(
-    async () => {
-      const text = await page.locator('.chip').nth(1).innerText();
-      return text.toLowerCase().includes('offline') ? text : '';
-    },
-    { timeout: 5000 },
-  );
-  chipText
-    ? pass(`connectivity label updated: "${chipText}"`)
-    : warn('connectivity label still reads "online" while offline. '
-         + 'navigator.onLine does not always reflect emulated offline mode; '
-         + 'the functional checks above are what matter.');
+  const started = Date.now();
+  const offlineHand = await handRendered();
+  const elapsed = Date.now() - started;
+  offlineHand.cards >= 5
+    ? pass(`engine offline: dealt a hand (${offlineHand.cards} cards)`)
+    : fail(`engine offline: only ${offlineHand.cards} cards rendered`);
+  console.log(`\n  desktop hand build, network cut: ${elapsed}ms (not a phone)`);
 
-  await page.getByRole('button', { name: /run benchmarks/i }).click();
-  await page.waitForSelector('table tbody tr td.good, table tbody tr td.bad', { timeout: 60_000 });
-  const offlineVerdict = await page.locator('.verdict').first().innerText();
-  offlineVerdict.includes('within tolerance')
-    ? pass(`engine offline: ${offlineVerdict}`)
-    : fail(`offline engine verdict: ${offlineVerdict}`);
-
-  const timing = await page.locator('.verdict').nth(1).innerText();
-  console.log(`\n  desktop timing (not a phone): ${timing}`);
+  // Answering a field proves the interaction works from the precache too.
+  await page.locator('.number-field input').fill('9');
+  await page.locator('button.primary').click();
+  await page.waitForTimeout(250);
+  (await page.locator('.ask h2').innerText()) !== offlineHand.question
+    ? pass('advanced to the next field offline')
+    : fail('the form did not advance offline');
 } else {
   console.log('  skip  post-reload checks (the offline reload never completed)');
 }
