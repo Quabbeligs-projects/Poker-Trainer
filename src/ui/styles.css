@@ -138,3 +138,227 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ==========================================================================
+   Cards — four-colour deck
+   Suit-reading speed matters, so suits are coloured rather than left
+   black-and-red. Faces stay light on the dark table so a black spade reads.
+   ========================================================================== */
+
+.card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #F2EFE6;
+  border-radius: 6px;
+  line-height: 1;
+  font-variant-numeric: lining-nums;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  flex: none;
+}
+.card-normal { width: 42px; height: 58px; }
+.card-small  { width: 30px; height: 42px; border-radius: 4px; }
+.card-large  { width: 52px; height: 72px; }
+
+.card-rank { font-weight: 700; letter-spacing: -0.04em; }
+.card-normal .card-rank { font-size: 24px; }
+.card-small  .card-rank { font-size: 17px; }
+.card-large  .card-rank { font-size: 30px; }
+
+.card-suit { margin-top: 1px; }
+.card-normal .card-suit { font-size: 15px; }
+.card-small  .card-suit { font-size: 11px; }
+.card-large  .card-suit { font-size: 19px; }
+
+.suit-s { color: #14201D; }
+.suit-h { color: #C8402F; }
+.suit-d { color: #2F6FB8; }
+.suit-c { color: #2E7D52; }
+
+.card-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-row-cards { display: flex; gap: 5px; flex-wrap: wrap; }
+.card-row-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); min-width: 42px;
+}
+
+/* ==========================================================================
+   The hand screen
+   ========================================================================== */
+
+.hand-head, .verdict { display: flex; align-items: center; gap: 12px; }
+.hand-head {
+  justify-content: space-between; font-size: 13px; color: var(--ink-3);
+  border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 18px;
+}
+.street { text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; color: var(--gold); }
+.pot { font-variant-numeric: tabular-nums; }
+
+.table-strip { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+
+.seats { list-style: none; margin: 0 0 22px; padding: 0; display: flex;
+  flex-direction: column; gap: 6px; }
+.seats li {
+  display: flex; justify-content: space-between; gap: 12px; font-size: 13px;
+  padding: 8px 12px; border-radius: 8px; background: var(--surface);
+  border: 1px solid var(--line);
+}
+.seats li.hero { border-color: var(--gold); }
+.seat-name { font-weight: 600; }
+.seat-actions { color: var(--ink-3); text-align: right; }
+
+.progress { display: flex; gap: 5px; margin-bottom: 18px; }
+.progress span {
+  height: 3px; flex: 1; border-radius: 2px; background: var(--line);
+}
+.progress span.done { background: var(--good); }
+.progress span.now { background: var(--gold); }
+
+.ask h2 { font-size: 20px; margin: 0 0 6px; text-wrap: balance; }
+.ask .hint { margin-bottom: 16px; }
+
+.number-field {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+}
+.number-field input {
+  font: inherit; font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums;
+  width: 100%; min-height: 60px; padding: 0 16px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.number-field input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.number-field .suffix { font-size: 26px; color: var(--ink-3); }
+
+.checkbox {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
+  font-size: 14px; color: var(--ink-2);
+  /* Comfortably over the 44pt minimum, since it sits next to a number pad. */
+  min-height: 44px;
+}
+.checkbox input { width: 22px; height: 22px; accent-color: var(--gold); }
+
+.action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.action-button {
+  flex: 1 1 30%; min-width: 96px; min-height: 56px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px;
+  font: inherit; font-weight: 600; text-transform: capitalize; cursor: pointer;
+}
+.action-button:hover { border-color: var(--gold); }
+.action-button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+.answered { list-style: none; margin: 22px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.answered li { background: var(--surface); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 11px; }
+.answered b { color: var(--ink); }
+
+/* ==========================================================================
+   Feedback screen
+   ========================================================================== */
+
+.verdict {
+  padding: 16px; border-radius: 12px; margin-bottom: 20px;
+  border: 1px solid var(--line); background: var(--surface);
+}
+.verdict.ok { border-color: var(--good); }
+.verdict.miss { border-color: var(--bad); }
+.verdict-mark { font-size: 30px; line-height: 1; }
+.verdict.ok .verdict-mark { color: var(--good); }
+.verdict.miss .verdict-mark { color: var(--bad); }
+.verdict-text { display: flex; flex-direction: column; font-size: 20px; font-weight: 600; }
+.verdict-text small { font-size: 12px; font-weight: 400; color: var(--ink-3);
+  text-transform: capitalize; }
+
+.hand-strip { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+
+.feedback section { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 24px; }
+.feedback section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+.feedback h3 { font-size: 15px; margin: 0 0 12px; letter-spacing: -0.005em; }
+
+.answer {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 10px; padding: 10px 12px; border-radius: 8px; margin-bottom: 6px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.answer.ok { border-left: 3px solid var(--good); }
+.answer.miss { border-left: 3px solid var(--bad); }
+.answer-label { font-size: 13px; color: var(--ink-2); }
+.answer-values { display: flex; align-items: baseline; gap: 7px;
+  font-variant-numeric: tabular-nums; }
+.answer-given { font-size: 17px; font-weight: 600; }
+.answer-arrow { color: var(--ink-3); font-size: 12px; }
+.answer-truth { font-size: 17px; font-weight: 600; color: var(--gold); }
+.answer-verdict { font-size: 13px; font-variant-numeric: tabular-nums; min-width: 34px;
+  text-align: right; }
+.answer.ok .answer-verdict { color: var(--good); }
+.answer.miss .answer-verdict { color: var(--bad); }
+
+.diagnosis p { margin: 0 0 10px; color: var(--ink-2); font-size: 14px; }
+
+.split-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden;
+  background: var(--line); margin-bottom: 12px; }
+.split-asis { background: var(--good); }
+.split-improved { background: var(--gold); }
+.split-legend { display: flex; flex-direction: column; gap: 7px;
+  font-size: 13px; color: var(--ink-2); }
+.swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block;
+  margin-right: 7px; }
+.swatch.asis { background: var(--good); }
+.swatch.improved { background: var(--gold); }
+
+.outs-group { margin-bottom: 12px; }
+.outs-group-label { display: block; font-size: 12px; color: var(--ink-3);
+  margin-bottom: 6px; }
+
+.rules ul { margin: 0 0 12px; padding-left: 18px; }
+.rules li { font-size: 13.5px; color: var(--ink-2); margin-bottom: 7px; }
+
+.timing-row { display: grid; grid-template-columns: 96px 1fr 42px;
+  align-items: center; gap: 10px; margin-bottom: 7px; font-size: 13px; }
+.timing-label { color: var(--ink-2); }
+.timing-bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.timing-bar span { display: block; height: 100%; background: var(--gold); }
+.timing-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+.seed { text-align: center; font-size: 11px; color: var(--ink-3); margin-top: 16px;
+  font-family: ui-monospace, monospace; }
+
+/* ==========================================================================
+   13x13 range grid
+   Sized off the container, never a fixed cell width, so it fits any phone
+   without horizontal scrolling.
+   ========================================================================== */
+
+.range-grid-figure { margin: 0; }
+.range-grid {
+  display: grid;
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+  width: 100%;
+}
+.rg-cell {
+  position: relative; aspect-ratio: 1; background: var(--surface-2, #1B2726);
+  display: flex; align-items: center; justify-content: center; min-width: 0;
+}
+.rg-cell::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: var(--w); background: var(--gold);
+}
+.rg-cell.out::before { display: none; }
+.rg-label {
+  position: relative; font-family: ui-monospace, monospace;
+  font-size: clamp(5px, 1.7vw, 8px); letter-spacing: -0.04em; color: var(--ink-3);
+}
+.rg-cell.in .rg-label { color: #10201C; }
+.rg-cell.pair { outline: 1px solid rgba(236, 231, 218, 0.22); outline-offset: -1px; }
+
+@media (max-width: 380px) {
+  .card-large { width: 46px; height: 64px; }
+  .card-large .card-rank { font-size: 26px; }
+}

@@ -15,7 +15,8 @@
     "sanity": "vite-node scripts/solverSanity.mjs",
     "icons": "node scripts/generateIcons.mjs",
     "verify:pwa": "node scripts/verifyPwa.mjs",
-    "calibrate": "vite-node scripts/calibration.mjs"
+    "calibrate": "vite-node scripts/calibration.mjs",
+    "smoke": "vite-node scripts/driveHand.mjs"
   },
   "dependencies": {
     "phe": "^0.6.0",

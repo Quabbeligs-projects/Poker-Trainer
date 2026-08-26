@@ -135,10 +135,15 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   if (outs !== null && !outs.correct && truth.hitProbability !== null) {
     mistakes.push('OUTS_MISCOUNT');
     const undercounted = outs.error !== null && outs.error < 0;
-    // Undercounting is usually deliberate: hero discounted outs that improve
-    // the hand to something that still loses. Say where that judgement belongs
-    // rather than treating it as a miscount.
-    diagnosis.push(template(undercounted ? 'OUTS_DISCOUNTED' : 'OUTS_MISCOUNT', truth.seed, {
+    // Whether a low count was a deliberate discount or a miscount is something
+    // only hero knows, and the two are opposite lessons. The checkbox answers
+    // it rather than the feedback guessing.
+    const key = undercounted && input.discountedSoftOuts
+      ? 'OUTS_DISCOUNTED'
+      : undercounted
+        ? 'OUTS_UNDERCOUNT'
+        : 'OUTS_MISCOUNT';
+    diagnosis.push(template(key, truth.seed, {
       given: outs.given === null ? '—' : outs.given,
       truth: truth.hitProbability.outs,
       difference: outs.error === null ? '—' : Math.abs(outs.error),
@@ -153,7 +158,9 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
       outs: truth.hitProbability.outs,
       exact: round(truth.hitProbability.exact),
       rule: round(truth.hitProbability.ruleOfThumb),
-      cards: truth.hitProbability.cardsToCome,
+      street: truth.hitProbability.cardsToCome === 1
+        ? 'one card to come'
+        : 'two cards to come',
     }));
   }
 
@@ -246,5 +253,6 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
     mistakes,
     diagnosis: diagnosis.filter((line) => line.length > 0),
     firedRules: truth.action.firedRules,
+    timings: input.timings,
   };
 }

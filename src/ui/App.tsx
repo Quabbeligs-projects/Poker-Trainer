@@ -1,251 +1,99 @@
 /**
- * Engine build check.
+ * One full Outs hand, end to end: deal, answer, feedback, next.
  *
- * This is NOT the trainer UI — that is step 5. This page exists so the engine
- * can be run on a real device, from an installed home-screen app, with the
- * network off. It answers two questions that cannot be answered from CI:
- *
- *   1. Does the whole engine actually work offline once installed?
- *   2. How fast is a 100,000-iteration Monte Carlo run on THIS phone?
- *
- * The spec says that if Monte Carlo blocks the UI for more than ~200ms on an
- * iPhone, `equity.ts` moves into a Web Worker. This measures that number.
+ * Preflop mode and the settings screen are deliberately not wired yet — the
+ * interaction is worth correcting on one working hand before both modes depend
+ * on it.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import rangesJson from '../data/ranges.json';
-import { codesFromStrings, createRng } from '../engine/deck';
-import { DEFAULT_ITERATIONS, computeEquity } from '../engine/equity';
-import { RangeCharts, Range, type RangeChartsJson } from '../engine/ranges';
+import { RangeCharts, type RangeChartsJson } from '../engine/ranges';
+import { createRng, generateSeed } from '../engine/deck';
+import { OutsHand } from '../game/session';
+import {
+  DEFAULT_SETTINGS,
+  type HandGrade,
+  type HandInput,
+  type HandTruth,
+} from '../game/types';
+import { FeedbackScreen } from './components/FeedbackScreen';
+import { OutsHandScreen } from './components/OutsHandScreen';
 
 const charts = new RangeCharts(rangesJson as unknown as RangeChartsJson);
-const C = (text: string) => codesFromStrings(text.split(/\s+/).filter(Boolean));
+const settings = { ...DEFAULT_SETTINGS, playerCount: 6 };
+
+/** Session-level generator, so each hand gets a fresh replayable seed. */
+const sessionRng = createRng(`session:${Date.now()}`);
 
 /**
- * Reference equities, enumerated exhaustively offline (every remaining board,
- * no sampling) by `exactEquityVsHand` and asserted in test/equity.test.ts.
- * Enumerating 1.7M preflop boards in a phone browser would take far too long,
- * so the trusted values are carried here and the live run is compared to them.
+ * A seed may be pinned with `?seed=...`, which replays that hand exactly.
+ * This is the mechanism Review mode will use to re-deal a hand you got wrong,
+ * and it makes the app inspectable without a debug build.
  */
-const BENCHMARKS = [
-  { name: 'AA vs KK', hero: 'As Ah', villain: 'Kc Kd', board: '', exact: 81.26 },
-  { name: 'AKs vs QQ', hero: 'Ah Kh', villain: 'Qs Qd', board: '', exact: 46.21 },
-  { name: '22 vs AKo', hero: '2c 2d', villain: 'Ah Ks', board: '', exact: 53.04 },
-  {
-    name: 'flush draw vs top pair',
-    hero: '7h 2h', villain: 'Ks 9c', board: 'Kd 8h 3h', exact: 36.57,
-  },
-  {
-    name: 'set vs nut flush draw',
-    hero: '7c 7d', villain: 'Ah Qh', board: '7h 5h 2c', exact: 74.44,
-  },
-] as const;
-
-interface Row {
-  name: string;
-  exact: number;
-  measured: number;
-  error: number;
-  ms: number;
-  standardError: number;
-}
-
-function useStandalone(): boolean {
-  const [standalone, setStandalone] = useState(false);
-  useEffect(() => {
-    const check = () =>
-      setStandalone(
-        window.matchMedia('(display-mode: standalone)').matches
-        || (window.navigator as { standalone?: boolean }).standalone === true,
-      );
-    check();
-    const media = window.matchMedia('(display-mode: standalone)');
-    media.addEventListener('change', check);
-    return () => media.removeEventListener('change', check);
-  }, []);
-  return standalone;
-}
-
-/**
- * Tracks connectivity.
- *
- * Reading `navigator.onLine` once and then relying purely on `online`/`offline`
- * events is a trap: when a document LOADS while already offline, no event ever
- * fires, so a stale first read is never corrected. If the initial render
- * happens in the window before the value settles, the indicator is wrong
- * permanently. So re-read whenever the effect attaches, and again whenever the
- * page is restored or becomes visible, which is also when a phone coming out of
- * standby needs re-checking.
- *
- * Even with this, `navigator.onLine` only reports whether a network interface
- * exists — it cannot tell a captive portal or an emulated offline mode from
- * real connectivity. It is a hint for the reader, never a fact the app relies
- * on, which is why nothing here gates on it.
- */
-function useOnline(): boolean {
-  const [online, setOnline] = useState(() => navigator.onLine);
-  useEffect(() => {
-    const sync = () => setOnline(navigator.onLine);
-    sync(); // closes the gap between document creation and this effect
-    window.addEventListener('online', sync);
-    window.addEventListener('offline', sync);
-    window.addEventListener('pageshow', sync);
-    document.addEventListener('visibilitychange', sync);
-    return () => {
-      window.removeEventListener('online', sync);
-      window.removeEventListener('offline', sync);
-      window.removeEventListener('pageshow', sync);
-      document.removeEventListener('visibilitychange', sync);
-    };
-  }, []);
-  return online;
+function seedFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pinned = new URLSearchParams(window.location.search).get('seed');
+  return pinned !== null && pinned.length > 0 ? pinned : null;
 }
 
 export function App(): JSX.Element {
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [running, setRunning] = useState(false);
-  const [worst, setWorst] = useState(0);
-  const standalone = useStandalone();
-  const online = useOnline();
+  const pinnedSeed = seedFromUrl();
+  const [seed, setSeed] = useState(() => pinnedSeed ?? generateSeed(sessionRng));
+  const [lastGrade, setLastGrade] = useState<HandGrade | null>(null);
+  /**
+   * The truth that was ANSWERED, captured before submitting.
+   *
+   * `hand.submit` returns the ADVANCED state, so on a correct flop its truth is
+   * already the turn's — board, outs, equity split, fired rules and range grid
+   * would all describe a street hero has not seen yet, against answers from the
+   * one they just played.
+   */
+  const [gradedTruth, setGradedTruth] = useState<HandTruth | null>(null);
 
-  const run = useCallback(() => {
-    setRunning(true);
-    // Yield a frame so the button's pressed state paints before the main
-    // thread is blocked. If this is not enough on a real phone, that is the
-    // signal to move the engine into a Web Worker.
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const results: Row[] = [];
-        let slowest = 0;
-        for (const benchmark of BENCHMARKS) {
-          const started = performance.now();
-          const result = computeEquity({
-            hole: C(benchmark.hero),
-            board: C(benchmark.board),
-            opponents: [Range.parse([benchmark.villain.split(/\s+/).join('')])],
-            rng: createRng(`build-check:${benchmark.name}`),
-            iterations: DEFAULT_ITERATIONS,
-          });
-          const ms = performance.now() - started;
-          if (ms > slowest) slowest = ms;
-          results.push({
-            name: benchmark.name,
-            exact: benchmark.exact,
-            measured: result.equity,
-            error: result.equity - benchmark.exact,
-            ms,
-            standardError: result.standardError,
-          });
-        }
-        setRows(results);
-        setWorst(slowest);
-        setRunning(false);
-      }, 0);
-    });
+  // Rebuilt only when the seed changes, so the Monte Carlo runs once per hand.
+  const hand = useMemo(() => new OutsHand(seed, settings, charts), [seed]);
+  const [state, setState] = useState(hand.current);
+
+  const submit = useCallback((input: HandInput) => {
+    const answered = state.truth;
+    const result = hand.submit(input);
+    setGradedTruth(answered);
+    setLastGrade(result.grade);
+    setState(result.state);
+  }, [hand, state.truth]);
+
+  const nextHand = useCallback(() => {
+    setLastGrade(null);
+    setSeed(generateSeed(sessionRng));
   }, []);
 
-  const allPass = rows !== null && rows.every((r) => Math.abs(r.error) < 0.5);
+  const continueHand = useCallback(() => {
+    setLastGrade(null);
+    setState(hand.current);
+  }, [hand]);
+
+  const truth = state.truth;
+  if (truth === null) return <main><p>No hand.</p></main>;
+
+  const handOver = state.phase === 'won' || state.phase === 'lost';
 
   return (
     <main>
-      <header>
-        <h1>Poker Equity Trainer</h1>
-        <p className="lede">
-          Engine build check. The trainer UI is not built yet — this page runs the
-          engine on this device so you can confirm it works offline and see how
-          fast Monte Carlo is on your own hardware.
-        </p>
-        <div className="chips">
-          <span className={`chip ${standalone ? 'ok' : ''}`}>
-            {standalone ? 'installed app' : 'in browser'}
-          </span>
-          <span className={`chip ${online ? '' : 'ok'}`}>
-            {online ? 'online' : 'offline — engine still running'}
-          </span>
-        </div>
-      </header>
-
-      <section>
-        <h2>Equity benchmarks</h2>
-        <p className="note">
-          {DEFAULT_ITERATIONS.toLocaleString()} iterations per scenario, compared
-          against values enumerated exhaustively offline. Anything under
-          ±0.5&thinsp;pp is well inside the ±5&thinsp;pp grading tolerance.
-        </p>
-        <button type="button" onClick={run} disabled={running}>
-          {running ? 'Computing…' : rows === null ? 'Run benchmarks' : 'Run again'}
-        </button>
-
-        {rows !== null && (
-          <>
-            <div className="scroller">
-              <table>
-                <thead>
-                  <tr>
-                    <th>scenario</th><th>exact</th><th>measured</th>
-                    <th>error</th><th>time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.name}>
-                      <td>{row.name}</td>
-                      <td>{row.exact.toFixed(2)}%</td>
-                      <td>{row.measured.toFixed(2)}%</td>
-                      <td className={Math.abs(row.error) < 0.5 ? 'good' : 'bad'}>
-                        {row.error >= 0 ? '+' : ''}{row.error.toFixed(2)}pp
-                      </td>
-                      <td>{row.ms.toFixed(0)}ms</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className={`verdict ${allPass ? 'good' : 'bad'}`}>
-              {allPass
-                ? 'All scenarios within tolerance.'
-                : 'A scenario is outside tolerance — do not trust this build.'}
-            </p>
-            <p className={`verdict ${worst > 200 ? 'bad' : 'good'}`}>
-              Slowest run {worst.toFixed(0)}ms.{' '}
-              {worst > 200
-                ? 'Over the 200ms budget — equity.ts should move into a Web Worker.'
-                : 'Inside the 200ms budget — no Web Worker needed yet.'}
-            </p>
-          </>
-        )}
-      </section>
-
-      <section>
-        <h2>Loaded charts</h2>
-        <p className="note">
-          Proof the range data is present and parsed, not just the code.
-        </p>
-        <div className="scroller">
-          <table>
-            <thead><tr><th>position</th><th>opens</th><th>combos</th></tr></thead>
-            <tbody>
-              {(['UTG', 'MP', 'CO', 'BTN', 'SB'] as const).map((position) => {
-                const range = charts.rfi(position);
-                return (
-                  <tr key={position}>
-                    <td>{position}</td>
-                    <td>{range.percentOfHands.toFixed(1)}%</td>
-                    <td>{range.comboCount}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <footer>
-        <p>
-          Add to Home Screen, then turn on Airplane Mode and reopen. Everything
-          above must still work.
-        </p>
-      </footer>
+      {lastGrade === null || gradedTruth === null ? (
+        <OutsHandScreen key={`${seed}:${state.phase}`} truth={truth} onSubmit={submit} />
+      ) : (
+        <FeedbackScreen
+          truth={gradedTruth}
+          grade={lastGrade}
+          onNext={handOver ? nextHand : continueHand}
+          nextLabel={
+            handOver
+              ? (state.outcome === 'won' ? 'Hand won — deal the next' : 'Next hand')
+              : 'Correct — see the turn'
+          }
+        />
+      )}
     </main>
   );
 }

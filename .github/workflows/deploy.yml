@@ -64,6 +64,11 @@ jobs:
       - name: Verify the PWA works offline
         run: npm run verify:pwa
 
+      # Plays one hand end to end in a real browser. Unit tests cannot catch
+      # wiring bugs between the game layer and the screens.
+      - name: Play a hand end to end
+        run: npm run smoke
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

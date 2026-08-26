@@ -100,6 +100,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
         const cardsToCome = board.length === 3 ? 2 : 1;
         return {
           outs: outs.total,
+          outCards: outs.outs.map((out) => ({ card: out.card, to: out.to })),
           exact: exactHitProbability(outs.total, cardsToCome, outs.unseen),
           ruleOfThumb: adjustedRuleOfThumb(outs.total, cardsToCome),
           cardsToCome,

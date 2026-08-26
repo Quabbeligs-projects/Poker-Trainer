@@ -32,13 +32,14 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 291 tests, ~25s
+npm test            # 294 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
 npm run icons       # regenerate the PWA icons
 npm run build       # typecheck + production build
 npm run verify:pwa  # build must work offline in a real browser
+npm run smoke       # play one hand end to end in a real browser
 npm run dev       # (once UI exists)
 npm run build
 ```
@@ -487,7 +488,37 @@ inputs, a set with zero outs and 89% equity stops being a grading failure and
 becomes the clearest demonstration that counting outs and estimating equity are
 different questions.
 
+## UI
+
+Built so far: one full Outs hand, end to end. Preflop mode and the settings
+screen are deliberately not wired yet — the interaction is worth correcting on
+one working hand before both modes depend on it.
+
+**The feedback screen was designed first** and the hand screen follows it, since
+that is where the learning happens. Order on the page: the verdict, then the
+answers against truth, then *why* the equity was what it was, then the evidence
+— every out grouped by what it makes, the solver's rules verbatim, and the
+opponent's narrowed range as a 13×13 grid.
+
+Fields are asked **one at a time** rather than as a form. It keeps the number
+pad in one place on a phone, stops a later answer being revised after seeing an
+earlier one, and makes the per-field timing exact rather than inferred.
+
+**Soft outs are asked about, not guessed.** Entering 11 against a raw count of
+14 could be a deliberate discount or a miscount, and those are opposite lessons
+from the same number. A checkbox next to the field decides which feedback fires.
+
+**Per-field timings** appear on the feedback screen, so the time-trial range can
+be set from evidence now that there are five fields rather than three.
+
+`?seed=XXX` replays a hand exactly — the mechanism Review mode will use.
+
+Four-colour deck: spades black, hearts red, diamonds blue, clubs green, on light
+card faces so a black spade still reads against the dark table. The 13×13 grid
+sizes off its container (27px cells at 390px wide), so nothing scrolls
+horizontally on an iPhone.
+
 ## Still to build
 
-5. UI (dark theme, four-colour deck, oval table)
-6. Stats, review mode
+- Preflop mode wiring and the settings screen
+- Stats and review mode

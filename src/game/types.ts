@@ -91,8 +91,23 @@ export interface Seat {
  * `HIT_PROBABILITY_TOLERANCE`. `ruleOfThumb` carries the adjusted shortcut for
  * display, so feedback can show both figures side by side.
  */
+/** One card that improves hero's hand, and what it improves it to. */
+export interface OutCard {
+  readonly card: Card;
+  readonly to: HandCategory;
+}
+
 export interface HitProbabilityTruth {
   readonly outs: number;
+  /**
+   * Every out, so feedback can show the full list grouped by what it makes.
+   *
+   * Note the feedback cannot say WHICH outs hero missed: the input is a count,
+   * so entering 11 against 14 identifies no particular cards. Showing all of
+   * them grouped lets hero spot the omission themselves, which is honest;
+   * naming three would be a guess.
+   */
+  readonly outCards: readonly OutCard[];
   /** Exact probability of hitting at least one out. */
   readonly exact: number;
   /** The adjusted rule of 4 and 2 for this out count, for display. */
@@ -175,9 +190,25 @@ export interface HandTruth {
 /* Input and grading                                                           */
 /* -------------------------------------------------------------------------- */
 
+/** Per-field time spent, in milliseconds. */
+export type FieldTimings = Partial<Record<InputField, number>>;
+
+export const INPUT_FIELDS = ['outs', 'hitProbability', 'equity', 'potOdds', 'action'] as const;
+export type InputField = (typeof INPUT_FIELDS)[number];
+
 export interface HandInput {
   /** Hero's out count. Null when not asked. */
   readonly outs: number | null;
+  /**
+   * Hero ticked "I discounted soft outs".
+   *
+   * Only hero knows whether a low count was a deliberate discount or a
+   * miscount, and they are opposite lessons from the same number. Without this
+   * the feedback has to guess, so it asks instead.
+   */
+  readonly discountedSoftOuts: boolean;
+  /** How long each field took. Recorded for the post-hand breakdown. */
+  readonly timings: FieldTimings;
   /** Hero's hit-probability estimate, percent. Null when not asked. */
   readonly hitProbability: number | null;
   /** Hero's equity estimate, percent. Null in Preflop mode. */
@@ -235,6 +266,8 @@ export interface HandGrade {
   readonly diagnosis: readonly string[];
   /** The solver's rules, verbatim. */
   readonly firedRules: readonly string[];
+  /** Time spent per field, echoed from the input for the post-hand breakdown. */
+  readonly timings: FieldTimings;
 }
 
 /* -------------------------------------------------------------------------- */
