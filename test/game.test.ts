@@ -6,6 +6,7 @@ import { codesFromStrings, createRng } from '../src/engine/deck';
 import { buildTruth } from '../src/game/truth';
 import { classifyCombo } from '../src/engine/rangeNarrowing';
 import { OutsHand, buildPreflopHand, gradePreflop, solvePreflop } from '../src/game/session';
+import { seatPositions } from '../src/engine/ranges';
 import { gradeHand } from '../src/game/grading';
 import {
   buildOutsSpot,
@@ -659,6 +660,35 @@ describe('Preflop mode', () => {
     expect(grade.mistakes).toContain('TIMEOUT');
   });
 
+  it('carries the charts it was graded against, with hero located on them', () => {
+    // A verdict alone teaches nothing about the next hand; the chart does.
+    for (let i = 0; i < 30; i++) {
+      const truth = buildPreflopHand(`pf-chart-${i}`, settings, charts);
+      expect(truth.ranges.length).toBeGreaterThan(0);
+      expect(truth.heroHandKey).toMatch(/^[2-9TJQKA]{2}[so]?$/);
+      for (const range of truth.ranges) {
+        expect(range.label.length).toBeGreaterThan(0);
+        // Every weight is a real fraction, and the grid can render it.
+        for (const [key, weight] of range.handKeyWeights) {
+          expect(key).toMatch(/^[2-9TJQKA]{2}[so]?$/);
+          expect(weight).toBeGreaterThan(0);
+          expect(weight).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+  });
+
+  it('agrees with its own charts about whether hero is in range', () => {
+    for (let i = 0; i < 40; i++) {
+      const truth = buildPreflopHand(`pf-agree-${i}`, settings, charts);
+      const inSomeRange = truth.ranges.some((range) =>
+        range.handKeyWeights.some(([key]) => key === truth.heroHandKey));
+      // If the hand is in none of the consulted charts, folding must be the
+      // only accepted action — otherwise the verdict and the chart disagree.
+      if (!inSomeRange) expect(truth.accepted).toEqual(['fold']);
+    }
+  });
+
   it('replays a seed exactly', () => {
     const a = buildPreflopHand('pf-replay', settings, charts);
     const b = buildPreflopHand('pf-replay', settings, charts);
@@ -883,6 +913,55 @@ describe('equity bands', () => {
 });
 
 describe('settings', () => {
+  it('builds a coherent hand from every seat at every table size', () => {
+    // Hero is not always behind an opener: from UTG nobody acts first, and
+    // heads-up on the button the only other seat is the big blind, which never
+    // opens. Both used to be broken — the second threw outright.
+    for (let players = 2; players <= 10; players++) {
+      const seats = seatPositions(players);
+      expect(seats).toHaveLength(players);
+      for (const seat of seats) {
+        const truth = new OutsHand(`seat-${players}-${seat.seatIndex}`,
+          { ...settings, playerCount: players, fixedSeatIndex: seat.seatIndex },
+          charts, 2_000).current.truth!;
+        expect(truth.heroSeatIndex).toBe(seat.seatIndex);
+        expect(truth.toCall).toBeGreaterThan(0);
+
+        // Exactly one opponent is live, and exactly one seat raised preflop.
+        const live = truth.seats.filter((s) => !s.hasFolded);
+        expect(live).toHaveLength(2);
+        const raisers = truth.seats.filter((s) =>
+          s.actions.some((a) => a.description.startsWith('raised')));
+        expect(raisers, `${players}-handed, seat ${seat.seatIndex}`).toHaveLength(1);
+
+        // Whoever raised must have acted before whoever called.
+        const raiser = raisers[0]!;
+        const caller = live.find((s) => s.seatIndex !== raiser.seatIndex)!;
+        expect(
+          raiser.seatIndex,
+          `${players}-handed: ${caller.display} cannot call a raise from ` +
+          `${raiser.display}, who acts later`,
+        ).toBeLessThan(caller.seatIndex);
+      }
+    }
+  });
+
+  it('counts a timeout as a loss in both modes', () => {
+    const hand = new OutsHand('timeout-both', settings, charts, 2_000);
+    const truth = hand.current.truth!;
+    const { grade, state } = hand.submit({
+      outs: null, cleanOuts: null, timings: {}, hitProbability: null,
+      equityBand: null, potOdds: null, action: null, timedOut: true,
+    }, truth);
+    expect(grade.passed).toBe(false);
+    expect(grade.mistakes).toContain('TIMEOUT');
+    expect(state.outcome).toBe('lost');
+
+    const preflop = buildPreflopHand('timeout-pf', settings, charts);
+    expect(gradePreflop(preflop, null, true).passed).toBe(false);
+    expect(gradePreflop(preflop, null, true).mistakes).toContain('TIMEOUT');
+  });
+
   it('offers 5:00 down to 0:15 in 15-second steps', () => {
     const choices = timeTrialChoices();
     expect(choices[0]).toBe(300);

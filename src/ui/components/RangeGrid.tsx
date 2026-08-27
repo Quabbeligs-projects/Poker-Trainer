@@ -11,10 +11,12 @@
  */
 import { HAND_GRID } from '../../engine/ranges';
 
-export function RangeGrid({ weights, caption }: {
+export function RangeGrid({ weights, caption, highlight }: {
   /** Hand key to weight in [0, 1]. */
   weights: ReadonlyMap<string, number>;
   caption?: string;
+  /** A hand key to ring, so hero can find their own hand on the chart. */
+  highlight?: string;
 }): JSX.Element {
   return (
     <figure className="range-grid-figure">
@@ -22,10 +24,11 @@ export function RangeGrid({ weights, caption }: {
         {HAND_GRID.map((row) => row.map((key) => {
           const weight = weights.get(key) ?? 0;
           const kind = key.length === 2 ? 'pair' : key.endsWith('s') ? 'suited' : 'offsuit';
+          const mine = key === highlight;
           return (
             <span
               key={key}
-              className={`rg-cell ${kind} ${weight > 0 ? 'in' : 'out'}`}
+              className={`rg-cell ${kind} ${weight > 0 ? 'in' : 'out'}${mine ? ' mine' : ''}`}
               style={{ '--w': `${(weight * 100).toFixed(1)}%` } as React.CSSProperties}
               title={`${key} — ${Math.round(weight * 100)}%`}
             >

@@ -178,13 +178,26 @@ cached.total >= 5
 // Rendering a hand exercises the whole engine: a spot is built, ranges are
 // narrowed, and a 100k-iteration Monte Carlo produces the truth object. If any
 // of that fails there is no question on screen.
+/**
+ * Gets to a dealt hand the way a user does, through the settings screen, and
+ * reports what was rendered. Reaching a question at all proves the whole engine
+ * ran: a spot was built, ranges narrowed, and a Monte Carlo produced the truth.
+ */
 const handRendered = async () => {
+  if (await page.locator('.settings').count() > 0) {
+    await page.getByRole('button', { name: /start outs/i }).click();
+  }
   await page.waitForSelector('.ask h2', { timeout: 60_000 });
   return {
     cards: await page.locator('.table-strip .card').count(),
     question: await page.locator('.ask h2').innerText(),
   };
 };
+// The settings screen is the real entry point, so check it renders first.
+(await page.locator('.settings h2').count()) >= 3
+  ? pass('settings screen rendered')
+  : fail('settings screen did not render on first load');
+
 const online = await handRendered();
 online.cards >= 5
   ? pass(`engine online: dealt a hand (${online.cards} cards, asked "${online.question}")`)

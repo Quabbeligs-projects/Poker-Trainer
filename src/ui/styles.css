@@ -381,3 +381,59 @@ footer {
 /* Measured win rate beside each out group — the clean/soft split as a number. */
 .outs-group-label em { font-style: normal; color: var(--gold); }
 .outs-list h3 small { font-weight: 400; font-size: 12px; color: var(--ink-3); }
+
+/* ==========================================================================
+   Settings
+   ========================================================================== */
+
+.settings header { margin-bottom: 8px; }
+.settings section { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 24px; }
+.settings h2 { font-size: 16px; margin: 0 0 12px; }
+
+.field { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.field-label { font-size: 14px; color: var(--ink-2); }
+.field-label b { color: var(--gold); font-variant-numeric: tabular-nums; }
+
+select {
+  font: inherit; font-size: 16px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+  min-height: 48px; padding: 0 14px;
+}
+select:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+input[type="range"] { accent-color: var(--gold); height: 44px; }
+
+.start-row { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+.start-row .primary { flex: 1 1 45%; }
+.primary.secondary {
+  background: transparent; color: var(--gold); border: 1px solid var(--gold);
+}
+
+/* ==========================================================================
+   Session chrome
+   ========================================================================== */
+
+.session-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; min-height: 32px;
+}
+.link {
+  background: none; border: none; color: var(--ink-3); font: inherit;
+  font-size: 13px; padding: 6px 0; width: auto; min-height: 32px; cursor: pointer;
+}
+.link:hover { color: var(--ink); }
+.clock {
+  font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600;
+  color: var(--ink-2); padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line);
+}
+.clock.urgent { color: var(--bad); border-color: var(--bad); }
+
+/* Hero's own hand, ringed on a preflop chart. */
+.rg-cell.mine {
+  outline: 2px solid var(--good);
+  outline-offset: -2px;
+  z-index: 1;
+}
+.rg-cell.mine .rg-label { color: var(--ink); font-weight: 700; }
+.rg-cell.mine.in .rg-label { color: #10201C; }

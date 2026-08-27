@@ -131,17 +131,34 @@ export function buildOutsSpot(
     ? Math.min(settings.fixedSeatIndex, positions.length - 1)
     : rng.nextInt(positions.length);
 
-  // The opponent opens from a seat before hero where possible; otherwise from
-  // the first seat that can open at all.
-  const candidateOpeners = positions.filter(
-    (seat) => seat.seatIndex !== heroSeatIndex && seat.chart !== 'BB',
+  /*
+   * Who opened.
+   *
+   * Normally an earlier seat opens and hero calls. But hero is not always
+   * behind an opener: from UTG nobody acts first, and heads-up on the button
+   * the only other seat is the big blind, which never opens. Picking a later
+   * seat as the "opener" there produced an incoherent hand — hero calling a
+   * raise from someone who had not acted yet — and at two players it picked
+   * from an empty list and threw.
+   *
+   * So when no seat can open before hero, HERO is the raiser and the opponent
+   * is a caller who leads into the flop. Both shapes end with the opponent
+   * betting into hero, which is what the drill needs.
+   */
+  const earlier = positions.filter(
+    (seat) => seat.seatIndex < heroSeatIndex && seat.chart !== 'BB',
   );
-  const earlier = candidateOpeners.filter((seat) => seat.seatIndex < heroSeatIndex);
-  const pool = earlier.length > 0 ? earlier : candidateOpeners;
-  const opener = pool[rng.nextInt(pool.length)];
-  if (opener === undefined) {
-    throw new Error(`No seat can open at a ${settings.playerCount}-handed table`);
+  const heroOpened = earlier.length === 0;
+  const pool = heroOpened
+    ? positions.filter((seat) => seat.seatIndex !== heroSeatIndex)
+    : earlier;
+  const opponent = pool[rng.nextInt(pool.length)];
+  if (opponent === undefined) {
+    throw new Error(`No opponent available at a ${settings.playerCount}-handed table`);
   }
+
+  const heroPosition = positions[heroSeatIndex];
+  if (heroPosition === undefined) throw new Error(`Invalid hero seat ${heroSeatIndex}`);
 
   const betFraction = BET_FRACTIONS[rng.nextInt(BET_FRACTIONS.length)] as number;
 
@@ -181,11 +198,9 @@ export function buildOutsSpot(
    * the spec fixes stacks at 1000 and does not track money across hands, so the
    * only thing that has to be exact is the price hero is offered.
    */
-  const heroPosition = positions[heroSeatIndex];
-  if (heroPosition === undefined) throw new Error(`Invalid hero seat ${heroSeatIndex}`);
   let dead = 0;
   for (const seat of positions) {
-    if (seat.seatIndex === heroSeatIndex || seat.seatIndex === opener.seatIndex) continue;
+    if (seat.seatIndex === heroSeatIndex || seat.seatIndex === opponent.seatIndex) continue;
     if (seat.chart === 'SB') dead += SMALL_BLIND;
     if (seat.chart === 'BB') dead += BIG_BLIND;
   }
@@ -193,12 +208,12 @@ export function buildOutsSpot(
 
   const seats: Seat[] = positions.map((seat) => {
     const isHero = seat.seatIndex === heroSeatIndex;
-    const isOpener = seat.seatIndex === opener.seatIndex;
+    const isOpponent = seat.seatIndex === opponent.seatIndex;
     const actions: SeatAction[] = [];
-    if (isOpener) {
-      actions.push(describe('preflop', `raised to ${OPEN_TO}`));
-    } else if (isHero) {
-      actions.push(describe('preflop', 'called'));
+    if (isHero) {
+      actions.push(describe('preflop', heroOpened ? `raised to ${OPEN_TO}` : 'called'));
+    } else if (isOpponent) {
+      actions.push(describe('preflop', heroOpened ? 'called' : `raised to ${OPEN_TO}`));
     } else {
       actions.push(describe('preflop', 'folded'));
     }
@@ -207,7 +222,7 @@ export function buildOutsSpot(
       display: seat.display,
       chart: seat.chart,
       isHero,
-      hasFolded: !isHero && !isOpener,
+      hasFolded: !isHero && !isOpponent,
       actions,
     };
   });
@@ -220,11 +235,16 @@ export function buildOutsSpot(
     heroClass,
     seats,
     heroSeatIndex,
-    opponentSeatIndex: opener.seatIndex,
+    opponentSeatIndex: opponent.seatIndex,
     potAfterPreflop,
     betFraction,
-    opponentPreflopRange: charts.rfi(opener.chart).removeCards(heroCards),
-    opponentChart: opener.chart,
+    // A caller's range is not an opening range: when hero raised, the opponent
+    // is calling hero's open, so that is the chart to start from.
+    opponentPreflopRange: (heroOpened
+      ? charts.callingRange(opponent.chart, heroPosition.chart)
+      : charts.rfi(opponent.chart)
+    ).removeCards(heroCards),
+    opponentChart: opponent.chart,
   };
 }
 

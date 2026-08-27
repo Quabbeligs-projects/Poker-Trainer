@@ -23,6 +23,8 @@ import {
   type ChartPosition,
   type Range,
   RangeCharts,
+  comboIndex,
+  handKeyOfCombo,
   openerBucket,
   seatPositions,
 } from '../engine/ranges';
@@ -216,9 +218,19 @@ export class OutsHand {
 /** What hero is facing when the action reaches them. */
 export type FacingAction = 'foldedToHero' | 'open' | 'openWithCallers' | 'threeBet';
 
+/** A chart consulted for this decision, ready for the 13x13 grid. */
+export interface PreflopRangeView {
+  readonly action: ActionKind;
+  readonly label: string;
+  readonly percentOfHands: number;
+  readonly handKeyWeights: ReadonlyArray<readonly [string, number]>;
+}
+
 export interface PreflopTruth {
   readonly seed: string;
   readonly heroCardCodes: readonly CardCode[];
+  /** Hero's hand as a grid key, e.g. "AKs", so it can be located on the chart. */
+  readonly heroHandKey: string;
   readonly heroSeatIndex: number;
   readonly seats: readonly Seat[];
   readonly facing: FacingAction;
@@ -227,9 +239,13 @@ export interface PreflopTruth {
   readonly accepted: readonly ActionKind[];
   readonly best: ActionKind;
   readonly firedRules: readonly string[];
-  /** The chart ranges consulted, for the feedback grid. */
-  readonly rangeLabel: string;
-  readonly rangePercent: number;
+  /**
+   * Every chart consulted, for the feedback grid.
+   *
+   * Seeing where the hand sits on the chart is the whole lesson in Preflop
+   * mode — a verdict without the chart teaches nothing about the next hand.
+   */
+  readonly ranges: readonly PreflopRangeView[];
 }
 
 /**
@@ -251,19 +267,31 @@ export function solvePreflop(
   heroCards: readonly CardCode[],
   facing: FacingAction,
   openerChart: ChartPosition | null,
-): { accepted: ActionKind[]; best: ActionKind; rules: string[]; label: string; percent: number } {
+): {
+  accepted: ActionKind[];
+  best: ActionKind;
+  rules: string[];
+  ranges: PreflopRangeView[];
+} {
   const inRange = (range: Range): boolean =>
     range.weightOfCards(heroCards[0] as CardCode, heroCards[1] as CardCode) > 0;
   const rules: string[] = [];
+  const view = (action: ActionKind, range: Range): PreflopRangeView => ({
+    action,
+    label: range.label,
+    percentOfHands: range.percentOfHands,
+    handKeyWeights: [...range.handKeyWeights().entries()]
+      .map(([key, value]) => [key, value.weight / value.combos] as const),
+  });
 
   if (facing === 'foldedToHero') {
     const rfi = tableAdjustedRfi(charts, settings.playerCount, heroSeatIndex);
     if (inRange(rfi)) {
       rules.push(`hand is in the ${rfi.label} opening range (${rfi.percentOfHands.toFixed(1)}%) → raise`);
-      return { accepted: ['raise'], best: 'raise', rules, label: rfi.label, percent: rfi.percentOfHands };
+      return { accepted: ['raise'], best: 'raise', rules, ranges: [view('raise', rfi)] };
     }
     rules.push(`hand is outside the ${rfi.label} opening range → fold`);
-    return { accepted: ['fold'], best: 'fold', rules, label: rfi.label, percent: rfi.percentOfHands };
+    return { accepted: ['fold'], best: 'fold', rules, ranges: [view('raise', rfi)] };
   }
 
   if (openerChart === null) throw new Error(`Facing ${facing} needs an opener`);
@@ -275,11 +303,12 @@ export function solvePreflop(
     const accepted: ActionKind[] = [];
     if (inRange(response.fourBet)) { accepted.push('raise'); rules.push('hand is in the 4-bet range → raise'); }
     if (inRange(response.call)) { accepted.push('call'); rules.push('hand is in the calling range vs a 3-bet → call'); }
+    const views = [view('raise', response.fourBet), view('call', response.call)];
     if (accepted.length === 0) {
       rules.push('hand is in neither the 4-bet nor the calling range vs a 3-bet → fold');
-      return { accepted: ['fold'], best: 'fold', rules, label: response.call.label, percent: response.call.percentOfHands };
+      return { accepted: ['fold'], best: 'fold', rules, ranges: views };
     }
-    return { accepted, best: accepted[0] as ActionKind, rules, label: response.call.label, percent: response.call.percentOfHands };
+    return { accepted, best: accepted[0] as ActionKind, rules, ranges: views };
   }
 
   const response = facing === 'openWithCallers'
@@ -298,14 +327,12 @@ export function solvePreflop(
     accepted.push('call');
     rules.push(`hand is in the ${response.call.label} range (${response.call.percentOfHands.toFixed(1)}%) → call`);
   }
+  const views = [view('raise', raiseRange), view('call', response.call)];
   if (accepted.length === 0) {
     rules.push(`hand is in neither the calling nor the raising range vs a ${openerBucket(openerChart)} open → fold`);
-    return { accepted: ['fold'], best: 'fold', rules, label: response.call.label, percent: response.call.percentOfHands };
+    return { accepted: ['fold'], best: 'fold', rules, ranges: views };
   }
-  return {
-    accepted, best: accepted[0] as ActionKind, rules,
-    label: response.call.label, percent: response.call.percentOfHands,
-  };
+  return { accepted, best: accepted[0] as ActionKind, rules, ranges: views };
 }
 
 export interface PreflopGrade {
@@ -378,6 +405,9 @@ export function buildPreflopHand(
   return deepFreeze({
     seed,
     heroCardCodes: heroCards,
+    heroHandKey: handKeyOfCombo(
+      comboIndex(heroCards[0] as CardCode, heroCards[1] as CardCode),
+    ),
     heroSeatIndex,
     seats,
     facing,
@@ -385,8 +415,7 @@ export function buildPreflopHand(
     accepted: solved.accepted,
     best: solved.best,
     firedRules: solved.rules,
-    rangeLabel: solved.label,
-    rangePercent: solved.percent,
+    ranges: solved.ranges,
   });
 }
 

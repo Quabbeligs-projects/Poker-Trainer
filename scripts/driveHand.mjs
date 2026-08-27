@@ -116,6 +116,28 @@ if (process.env.SHOT_DIR) {
 }
 if (boardCards !== 4) { console.error('  FAIL turn board is not 4 cards'); process.exitCode = 1; }
 console.log('  page errors:', errors.length ? errors.join(' | ') : 'none');
+// --- Preflop mode, through the settings screen -----------------------------
+await page.goto(`http://localhost:${PORT}${BASE}`,{waitUntil:'networkidle'});
+await page.waitForSelector('.settings',{timeout:20000});
+await page.locator('button', {hasText:'Start Preflop'}).click();
+await page.waitForSelector('.action-button',{timeout:25000});
+const pfSeat = await page.locator('.seats li.hero').innerText();
+console.log(`PREFLOP reached via settings: ${pfSeat.replace(/\n/g,' — ')}`);
+await page.locator('.action-button').filter({hasText:/raise/i}).first().click();
+await page.waitForSelector('.verdict',{timeout:20000});
+const chartCount = await page.locator('.range-grid').count();
+const ringed = await page.locator('.rg-cell.mine').count();
+console.log(`  charts ${chartCount}, hero's hand ringed on ${ringed} cell(s)`);
+if (chartCount < 1) { console.error('  FAIL no chart shown in preflop feedback'); process.exitCode = 1; }
+if (ringed !== chartCount) {
+  console.error(`  FAIL expected hero's hand ringed once per chart`);
+  process.exitCode = 1;
+}
+const hscroll = await page.evaluate(
+  () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+if (hscroll) { console.error('  FAIL preflop feedback scrolls horizontally'); process.exitCode = 1; }
+console.log('  preflop feedback: ok');
+
 if (errors.length > 0) process.exitCode = 1;
 await browser.close(); server.close();
 console.log(process.exitCode ? '\nSMOKE TEST FAILED\n' : '\nSmoke test passed\n');

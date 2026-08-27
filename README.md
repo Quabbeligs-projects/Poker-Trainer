@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 310 tests, ~30s
+npm test            # 314 tests, ~30s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -535,9 +535,7 @@ different questions.
 
 ## UI
 
-Built so far: one full Outs hand, end to end. Preflop mode and the settings
-screen are deliberately not wired yet — the interaction is worth correcting on
-one working hand before both modes depend on it.
+Both modes are playable from the settings screen.
 
 **The feedback screen was designed first** and the hand screen follows it, since
 that is where the learning happens. Order on the page: the verdict, then the
@@ -553,6 +551,19 @@ earlier one, and makes the per-field timing exact rather than inferred.
 be set from evidence now that there are five fields rather than three.
 
 `?seed=XXX` replays a hand exactly — the mechanism Review mode will use.
+`?mode=preflop` skips straight into that mode.
+
+**Settings** hides what does not apply: the time-trial length and the fixed-seat
+picker appear only once their checkbox is on. Shrinking the table clears a fixed
+seat that no longer exists rather than silently moving hero somewhere else.
+
+**Preflop feedback leads with the chart.** A verdict alone says nothing about
+the next hand; seeing where this hand sits on the range being graded against
+transfers directly, so hero's hand is ringed on every chart consulted.
+
+**The time trial** runs a per-hand countdown in both modes. Expiry submits an
+empty answer, which the grader already counts as a loss, and the timer is keyed
+on the hand so it cannot fire twice for one decision.
 
 Four-colour deck: spades black, hearts red, diamonds blue, clubs green, on light
 card faces so a black spade still reads against the dark table. The 13×13 grid
@@ -584,5 +595,4 @@ is the point.
 
 ## Still to build
 
-- Preflop mode wiring and the settings screen
 - Stats and review mode
