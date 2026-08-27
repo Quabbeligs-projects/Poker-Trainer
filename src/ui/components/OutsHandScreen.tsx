@@ -13,7 +13,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ACTIONS, type ActionKind } from '../../engine/actionSolver';
-import type { FieldTimings, HandInput, HandTruth, InputField } from '../../game/types';
+import {
+  EQUITY_BANDS,
+  type EquityBandId,
+  type FieldTimings,
+  type HandInput,
+  type HandTruth,
+  type InputField,
+} from '../../game/types';
 import { CardRow } from './PlayingCard';
 
 interface Step {
@@ -44,9 +51,9 @@ function stepsFor(truth: HandTruth): Step[] {
   }
   steps.push({
     field: 'equity',
-    question: 'Your equity against his range?',
-    hint: 'How often you actually win — not how often you improve.',
-    suffix: '%',
+    question: 'Where do you stand against his range?',
+    hint: 'A judgement, not a calculation — how often you win, not how often you improve.',
+    suffix: '',
   });
   steps.push({
     field: 'potOdds',
@@ -72,12 +79,14 @@ function legalActions(truth: HandTruth): ActionKind[] {
 
 export function OutsHandScreen({ truth, onSubmit }: {
   truth: HandTruth;
-  onSubmit: (input: HandInput) => void;
+  /** Receives the truth this screen rendered, so a stale render cannot be graded. */
+  onSubmit: (input: HandInput, answering: HandTruth) => void;
 }): JSX.Element {
   const steps = stepsFor(truth);
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<Partial<Record<InputField, number>>>({});
   const [action, setAction] = useState<ActionKind | null>(null);
+  const [band, setBand] = useState<EquityBandId | null>(null);
   const [discounted, setDiscounted] = useState(false);
   const [draft, setDraft] = useState('');
   const timings = useRef<FieldTimings>({});
@@ -99,7 +108,7 @@ export function OutsHandScreen({ truth, onSubmit }: {
   }, []);
 
   const advance = useCallback((collected: Partial<Record<InputField, number>>,
-    chosen: ActionKind | null) => {
+    chosen: ActionKind | null, judged: EquityBandId | null) => {
     if (stepIndex + 1 < steps.length) {
       setStepIndex(stepIndex + 1);
       return;
@@ -109,12 +118,12 @@ export function OutsHandScreen({ truth, onSubmit }: {
       discountedSoftOuts: discounted,
       timings: timings.current,
       hitProbability: collected.hitProbability ?? null,
-      equity: collected.equity ?? null,
+      equityBand: judged,
       potOdds: collected.potOdds ?? null,
       action: chosen,
       timedOut: false,
-    });
-  }, [stepIndex, steps.length, onSubmit, discounted]);
+    }, truth);
+  }, [stepIndex, steps.length, onSubmit, discounted, truth]);
 
   const submitNumber = useCallback(() => {
     const parsed = Number.parseInt(draft, 10);
@@ -122,14 +131,14 @@ export function OutsHandScreen({ truth, onSubmit }: {
     recordTime(step.field);
     const next = { ...values, [step.field]: parsed };
     setValues(next);
-    advance(next, action);
-  }, [draft, step.field, values, action, advance, recordTime]);
+    advance(next, action, band);
+  }, [draft, step.field, values, action, band, advance, recordTime]);
 
   const chooseAction = useCallback((chosen: ActionKind) => {
     recordTime('action');
     setAction(chosen);
-    advance(values, chosen);
-  }, [values, advance, recordTime]);
+    advance(values, chosen, band);
+  }, [values, band, advance, recordTime]);
 
   return (
     <div className="hand">
@@ -164,7 +173,29 @@ export function OutsHandScreen({ truth, onSubmit }: {
         <h2>{step.question}</h2>
         {step.hint !== '' && <p className="hint">{step.hint}</p>}
 
-        {step.field === 'action' ? (
+        {step.field === 'equity' ? (
+          <div className="band-column">
+            {EQUITY_BANDS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="band-button"
+                onClick={() => {
+                  recordTime('equity');
+                  setBand(option.id);
+                  advance(values, action, option.id);
+                }}
+              >
+                <span className="band-label">{option.label}</span>
+                <span className="band-range">
+                  {option.min === 0 ? `under ${option.max}%`
+                    : option.max === 100 ? `over ${option.min}%`
+                    : `${option.min}–${option.max}%`}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : step.field === 'action' ? (
           <div className="action-row">
             {legalActions(truth).map((option) => (
               <button

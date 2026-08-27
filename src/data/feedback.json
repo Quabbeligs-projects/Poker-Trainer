@@ -5,12 +5,12 @@
     "{outs} outs, {street}. Exact is {exact}%; the shortcut gives {rule}%. You answered {given}%."
   ],
   "EQUITY_UNDER": [
-    "You estimated {given}% but true equity is {truth}% \u2014 {gap} points low. You are counting only the times you improve and ignoring the {asIs}% you win with {category} as it stands.",
-    "{given}% is {gap} points under the true {truth}%. Your hand wins {asIs}% of the time without improving at all."
+    "You judged {given}; you were {truth} \u2014 {percent}% against his range. You are counting only the times you improve and ignoring the {asIs}% you already win with {category}.",
+    "{given} is a band too low. True equity is {percent}%, which is {truth}. Your hand wins {asIs}% of the time without improving at all."
   ],
   "EQUITY_OVER": [
-    "You estimated {given}% but true equity is {truth}% \u2014 {gap} points high. Counting outs assumes every one of them wins; against this range they do not.",
-    "{given}% is {gap} points over the true {truth}%. Some of those outs give your opponent a better hand at the same time."
+    "You judged {given}; you were {truth} \u2014 {percent}% against his range. Counting outs assumes every one of them wins; against this range they do not.",
+    "{given} is a band too high. True equity is {percent}%, which is {truth}."
   ],
   "EQUITY_SOURCE": [
     "Where it comes from: {asIs} points from {category} already being good, {improved} points from improving. You improve {improveRate}% of the time.",
@@ -37,7 +37,7 @@
     "Timer expired before the hand was answered."
   ],
   "CORRECT": [
-    "Every field right: {equity}% equity, and {action} is the play.",
+    "Every field right. {equity}% equity, and {action} is the play.",
     "All correct. {equity}% equity, {action} is the play."
   ],
   "OUTS_DISCOUNTED": [
@@ -45,8 +45,8 @@
     "{given} counted, {difference} discounted as soft, raw count {truth}. Sound thinking in the wrong field: count every improving card here, then let the equity estimate carry the judgement."
   ],
   "OUTS_MISCOUNT": [
-    "You counted {given}; there are {truth}. That is {difference} too many \u2014 a card that pairs the board lifts everyone equally and is not your out.",
-    "{given} is {difference} over the actual {truth}. Check the list below: cards that improve the board rather than your hand do not count."
+    "You counted {given}; there are {truth}. That is {difference} too many. The full list is below \u2014 a card only counts if it improves YOUR hand beyond what it gives everyone.",
+    "{given} is {difference} over the actual {truth}. Compare against the list below: an improvement the whole table shares is not your out."
   ],
   "OUTS_UNDERCOUNT": [
     "You counted {given}; there are {truth}. You are {difference} short. The full list is below, grouped by what each card makes \u2014 the missing ones will be in whichever group you skipped.",

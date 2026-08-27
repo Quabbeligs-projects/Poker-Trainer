@@ -126,9 +126,20 @@ export class OutsHand {
   /**
    * Submits hero's answers for the current street.
    *
-   * Grading is pure; this method only advances the phase based on the verdict.
+   * `answering` is the truth object the caller RENDERED, and it must be the one
+   * currently pending. Requiring it makes a whole class of bug impossible to
+   * express: a UI holding stale state could otherwise show one hand while this
+   * graded another, which is exactly what happened once — a screen rendered the
+   * previous hand's cards while the answers were graded against a freshly dealt
+   * one, so a correct answer was marked wrong and the same seed appeared to
+   * produce two different truths.
+   *
+   * Grading itself is pure; this method only advances the phase.
    */
-  submit(input: HandInput): { grade: HandGrade; state: OutsHandState } {
+  submit(
+    input: HandInput,
+    answering: HandTruth,
+  ): { grade: HandGrade; state: OutsHandState } {
     // The truth object stays populated after the hand ends so the feedback
     // panel can render it, so completion is signalled by the phase, not by a
     // null truth.
@@ -137,6 +148,13 @@ export class OutsHand {
     }
     const truth = this.state.truth;
     if (truth === null) throw new Error('No decision is pending');
+    if (answering !== truth) {
+      throw new Error(
+        'Refusing to grade: the answers belong to a different hand than the one '
+        + `pending (${answering.seed} vs ${truth.seed}). The caller is holding `
+        + 'stale state.',
+      );
+    }
 
     const grade = gradeHand(truth, input);
     const grades = [...this.state.grades, grade];

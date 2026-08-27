@@ -13,12 +13,16 @@
 
 import feedbackTemplates from '../data/feedback.json';
 import {
-  EQUITY_TOLERANCE,
+  EQUITY_BANDS,
   HIT_PROBABILITY_TOLERANCE,
   OUTS_TOLERANCE,
   POT_ODDS_TOLERANCE,
   type ActionGrade,
+  type BandGrade,
+  type EquityBandId,
   type FieldGrade,
+  acceptableBands,
+  bandOf,
   type HandGrade,
   type HandInput,
   type HandTruth,
@@ -92,6 +96,23 @@ function gradeHitProbability(truth: HandTruth, given: number | null): FieldGrade
   return gradeNumeric(given, truth.hitProbability.exact, HIT_PROBABILITY_TOLERANCE);
 }
 
+/**
+ * Grades the equity judgement by band.
+ *
+ * Near a band edge both adjoining bands are accepted, so a true 40.1% does not
+ * fail an answer of "behind" by a tenth of a point.
+ */
+function gradeBand(given: EquityBandId | null, truthPercent: number): BandGrade {
+  const accepted = acceptableBands(truthPercent);
+  return {
+    correct: given !== null && accepted.includes(given),
+    given,
+    truthBand: bandOf(truthPercent),
+    truthPercent,
+    accepted,
+  };
+}
+
 function gradeAction(truth: HandTruth, given: HandInput['action']): ActionGrade {
   return {
     correct: given !== null && truth.action.accepted.includes(given),
@@ -125,7 +146,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   const hitProbability = gradeHitProbability(truth, input.hitProbability);
   const equity = truth.street === 'preflop'
     ? null
-    : gradeNumeric(input.equity, truth.equity.percent, EQUITY_TOLERANCE);
+    : gradeBand(input.equityBand, truth.equity.percent);
   const potOdds = truth.street === 'preflop'
     ? null
     : gradeNumeric(input.potOdds, truth.potOdds.percent, POT_ODDS_TOLERANCE);
@@ -166,18 +187,22 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
 
   /* --- equity ------------------------------------------------------------ */
   if (equity !== null && !equity.correct) {
-    const under = equity.error !== null && equity.error < 0;
+    const bandIndex = (id: EquityBandId | null) =>
+      EQUITY_BANDS.findIndex((band) => band.id === id);
+    const under = equity.given !== null
+      && bandIndex(equity.given) < bandIndex(equity.truthBand);
     mistakes.push(under ? 'EQUITY_UNDER' : 'EQUITY_OVER');
     const breakdown = truth.equity.breakdown;
+    const label = (id: EquityBandId | null) =>
+      EQUITY_BANDS.find((band) => band.id === id)?.label ?? '—';
     diagnosis.push(template(under ? 'EQUITY_UNDER' : 'EQUITY_OVER', truth.seed, {
-      given: equity.given === null ? '—' : round(equity.given),
-      truth: round(equity.truth),
-      gap: equity.error === null ? '—' : round(Math.abs(equity.error)),
+      given: label(equity.given),
+      truth: label(equity.truthBand),
+      percent: round(equity.truthPercent),
       asIs: breakdown === null ? '0' : round(breakdown.asIs),
       improved: breakdown === null ? '0' : round(breakdown.improved),
       category: breakdown === null ? 'nothing' : breakdown.currentCategory,
     }));
-    // The decomposition is the actual lesson: say where the equity came from.
     if (breakdown !== null) {
       diagnosis.push(template('EQUITY_SOURCE', truth.seed, {
         asIs: round(breakdown.asIs),

@@ -5,7 +5,7 @@
  * interaction is worth correcting on one working hand before both modes depend
  * on it.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import rangesJson from '../data/ranges.json';
 import { RangeCharts, type RangeChartsJson } from '../engine/ranges';
@@ -39,40 +39,47 @@ function seedFromUrl(): string | null {
 
 export function App(): JSX.Element {
   const pinnedSeed = seedFromUrl();
-  const [seed, setSeed] = useState(() => pinnedSeed ?? generateSeed(sessionRng));
-  const [lastGrade, setLastGrade] = useState<HandGrade | null>(null);
+
   /**
-   * The truth that was ANSWERED, captured before submitting.
+   * The hand and its state are ONE piece of state, deliberately.
    *
-   * `hand.submit` returns the ADVANCED state, so on a correct flop its truth is
-   * already the turn's — board, outs, equity split, fired rules and range grid
-   * would all describe a street hero has not seen yet, against answers from the
-   * one they just played.
+   * They were previously a `useMemo` on the seed plus a separate `useState`
+   * initialised from it. `useState` initialises once, so changing the seed
+   * built a new hand while the state kept the old one's truth: the screen
+   * rendered the previous hand and the answers were graded against the new one.
+   * Holding both together makes that impossible — they can only change as a
+   * pair.
    */
+  const [session, setSession] = useState(() => {
+    const seed = pinnedSeed ?? generateSeed(sessionRng);
+    const hand = new OutsHand(seed, settings, charts);
+    return { hand, state: hand.current };
+  });
+  const [lastGrade, setLastGrade] = useState<HandGrade | null>(null);
+  /** The truth that was ANSWERED, captured before submitting. */
   const [gradedTruth, setGradedTruth] = useState<HandTruth | null>(null);
 
-  // Rebuilt only when the seed changes, so the Monte Carlo runs once per hand.
-  const hand = useMemo(() => new OutsHand(seed, settings, charts), [seed]);
-  const [state, setState] = useState(hand.current);
-
-  const submit = useCallback((input: HandInput) => {
-    const answered = state.truth;
-    const result = hand.submit(input);
-    setGradedTruth(answered);
+  const submit = useCallback((input: HandInput, answering: HandTruth) => {
+    const result = session.hand.submit(input, answering);
+    setGradedTruth(answering);
     setLastGrade(result.grade);
-    setState(result.state);
-  }, [hand, state.truth]);
+    setSession({ hand: session.hand, state: result.state });
+  }, [session.hand]);
 
   const nextHand = useCallback(() => {
+    const seed = generateSeed(sessionRng);
+    const hand = new OutsHand(seed, settings, charts);
+    setGradedTruth(null);
     setLastGrade(null);
-    setSeed(generateSeed(sessionRng));
+    setSession({ hand, state: hand.current });
   }, []);
 
   const continueHand = useCallback(() => {
+    setGradedTruth(null);
     setLastGrade(null);
-    setState(hand.current);
-  }, [hand]);
+  }, []);
 
+  const state = session.state;
   const truth = state.truth;
   if (truth === null) return <main><p>No hand.</p></main>;
 
@@ -81,7 +88,11 @@ export function App(): JSX.Element {
   return (
     <main>
       {lastGrade === null || gradedTruth === null ? (
-        <OutsHandScreen key={`${seed}:${state.phase}`} truth={truth} onSubmit={submit} />
+        <OutsHandScreen
+          key={`${truth.seed}:${state.phase}`}
+          truth={truth}
+          onSubmit={submit}
+        />
       ) : (
         <FeedbackScreen
           truth={gradedTruth}

@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 294 tests, ~25s
+npm test            # 302 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -392,6 +392,13 @@ submits input, and grading is a pure comparison.
 
 ### The truth guarantee
 
+`OutsHand.submit` requires the truth object the caller RENDERED and throws if it
+is not the one pending. That closes a class of bug by construction: a UI holding
+stale state once showed one hand while grading another, so a correct answer was
+marked wrong and the same seed appeared to produce two different truths. The
+engine was deterministic throughout — the desync was entirely in the caller.
+
+
 `buildTruth` takes no player input — there is no parameter to pass one through,
 which is deliberate and visible in the signature. `HandTruth` is deeply readonly
 so writing to it is a compile error, and `deepFreeze` freezes it so writing to
@@ -401,15 +408,28 @@ inputs, and that repeated grading returns identical verdicts.
 
 ### Grading tolerances
 
-Outs mode asks for three numbers, each isolating one skill, then the action:
+Outs mode asks four things, each isolating one skill, then the action:
 
-| field | tolerance | skill |
+| field | graded | skill |
 |---|---|---|
 | outs | exact | mechanical counting |
 | hit probability | ±3pp of the exact value | arithmetic |
-| equity | ±5pp | judgement against a range |
+| where you stand | correct band | judgement against a range |
 | pot odds | ±2pp | arithmetic, not estimation |
 | action | in the solver's accepted set | multiple actions can be right |
+
+**Equity is a band, not a number.** A numeric equity input asks for something no
+human can compute at a table: 64.5% against a 445-combo range is a Monte Carlo
+result, not an estimate. The per-field timings made the case — 557 seconds on
+that one field in a real session, against 0.2s for the fields that are actually
+calculable. The bands are *way behind* (<25), *behind* (25–40), *even* (40–60),
+*ahead* (60–80), *way ahead* (>80). Within 2pp of a band edge either adjoining
+band is accepted, so a true 40.1% cannot fail an answer of "behind" by a tenth
+of a point — the knife-edge problem that sank the two-anchor hit-probability
+scheme, avoided at band edges.
+
+The exact percentage, the as-is/improved split and the range grid all still
+appear in the feedback. The information is valuable; the input was not.
 
 The out count is asked for rather than displayed, because counting is the part
 that actually gets used at a table — showing the number reduces the drill to

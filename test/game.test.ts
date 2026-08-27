@@ -16,7 +16,9 @@ import {
 import { countOuts } from '../src/engine/outs';
 import {
   DEFAULT_SETTINGS,
-  EQUITY_TOLERANCE,
+  EQUITY_BANDS,
+  acceptableBands,
+  bandOf,
   HIT_PROBABILITY_TOLERANCE,
   POT_ODDS_TOLERANCE,
   type HandInput,
@@ -36,7 +38,7 @@ const perfect = (hand: OutsHand): HandInput => {
     discountedSoftOuts: false,
     timings: {},
     hitProbability: truth.hitProbability?.exact ?? null,
-    equity: truth.equity.percent,
+    equityBand: bandOf(truth.equity.percent),
     potOdds: truth.potOdds.percent,
     action: truth.action.best,
     timedOut: false,
@@ -75,7 +77,7 @@ describe('ground truth is frozen before the hand is shown', () => {
       gradeHand(truth, {
         outs: equity,
       discountedSoftOuts: false, timings: {},
-        hitProbability: equity, equity, potOdds: equity,
+        hitProbability: equity, equityBand: 'even', potOdds: equity,
         action: 'raise', timedOut: false,
       });
     }
@@ -86,13 +88,45 @@ describe('ground truth is frozen before the hand is shown', () => {
     const hand = new OutsHand('pure', settings, charts, ITER);
     const truth = hand.current.truth!;
     const input: HandInput = {
-      outs: 9, hitProbability: 30, equity: 40, potOdds: 25, action: 'call', timedOut: false,
+      outs: 9, hitProbability: 30, equityBand: 'even', potOdds: 25, action: 'call', timedOut: false,
       discountedSoftOuts: false, timings: {},
     };
     const first = JSON.stringify(gradeHand(truth, input));
     for (let i = 0; i < 5; i++) {
       expect(JSON.stringify(gradeHand(truth, input))).toBe(first);
     }
+  });
+});
+
+describe('a stale render can never be graded', () => {
+  it('refuses answers belonging to a different hand', () => {
+    // The bug this prevents: a screen rendered hand A while hand B was pending,
+    // so answers correct for what was on screen were graded against a hand the
+    // player never saw. The same seed appeared to produce two different truths.
+    const handA = new OutsHand('stale-a', settings, charts, 2_000);
+    const handB = new OutsHand('stale-b', settings, charts, 2_000);
+    const staleTruth = handA.current.truth!;
+    expect(() => handB.submit({
+      outs: 1, discountedSoftOuts: false, timings: {},
+      hitProbability: 1, equityBand: 'even', potOdds: 1,
+      action: 'fold', timedOut: false,
+    }, staleTruth)).toThrow(/different hand|stale/i);
+  });
+
+  it('accepts the truth it is currently showing', () => {
+    const hand = new OutsHand('fresh', settings, charts, 2_000);
+    const truth = hand.current.truth!;
+    expect(() => hand.submit(perfect(hand), truth)).not.toThrow();
+  });
+
+  it('builds byte-identical truth for a seed, however many times', () => {
+    // Determinism is the property the whole app rests on, so it is asserted on
+    // the seed the report came from, not only on a synthetic one.
+    const build = () => JSON.stringify(
+      new OutsHand('J83CK9QYHS', settings, charts, 20_000).current.truth,
+    );
+    const first = build();
+    for (let i = 0; i < 3; i++) expect(build()).toBe(first);
   });
 });
 
@@ -121,7 +155,7 @@ describe('Outs mode', () => {
     // Force a non-fold so the hand continues.
     const action = hand.current.truth!.action.accepted.find((a) => a !== 'fold')
       ?? hand.current.truth!.action.best;
-    const { grade, state } = hand.submit({ ...input, action });
+    const { grade, state } = hand.submit({ ...input, action }, hand.current.truth!);
     if (action === 'fold') return; // covered by the fold test
     expect(grade.passed).toBe(true);
     expect(state.phase).toBe('turn');
@@ -134,7 +168,7 @@ describe('Outs mode', () => {
     for (let i = 0; i < 60; i++) {
       const hand = new OutsHand(`fold-${i}`, settings, charts, 5_000);
       if (hand.current.truth!.action.best !== 'fold') continue;
-      const { grade, state } = hand.submit({ ...perfect(hand), action: 'fold' });
+      const { grade, state } = hand.submit({ ...perfect(hand), action: 'fold' }, hand.current.truth!);
       expect(grade.passed).toBe(true);
       expect(state.phase).toBe('won');
       expect(state.outcome).toBe('won');
@@ -152,7 +186,7 @@ describe('Outs mode', () => {
     const answered = hand.current.truth!;
     const action = answered.action.accepted.find((a) => a !== 'fold') ?? answered.action.best;
     if (action === 'fold') return;
-    const { state } = hand.submit({ ...perfect(hand), action });
+    const { state } = hand.submit({ ...perfect(hand), action }, hand.current.truth!);
     if (state.phase !== 'turn') return;
     expect(state.truth).not.toBe(answered);
     expect(state.truth!.board).toHaveLength(4);
@@ -162,8 +196,8 @@ describe('Outs mode', () => {
   it('ends the hand as a loss on any wrong answer', () => {
     const hand = new OutsHand('lose', settings, charts, ITER);
     const { grade, state } = hand.submit({
-      ...perfect(hand), equity: hand.current.truth!.equity.percent + 40,
-    });
+      ...perfect(hand), equityBand: 'wayAhead',
+    }, hand.current.truth!);
     expect(grade.passed).toBe(false);
     expect(state.phase).toBe('lost');
     expect(state.outcome).toBe('lost');
@@ -171,7 +205,7 @@ describe('Outs mode', () => {
 
   it('counts a timeout as a loss regardless of the answers', () => {
     const hand = new OutsHand('timeout', settings, charts, ITER);
-    const { grade, state } = hand.submit({ ...perfect(hand), timedOut: true });
+    const { grade, state } = hand.submit({ ...perfect(hand), timedOut: true }, hand.current.truth!);
     expect(grade.passed).toBe(false);
     expect(grade.mistakes).toContain('TIMEOUT');
     expect(state.outcome).toBe('lost');
@@ -179,8 +213,9 @@ describe('Outs mode', () => {
 
   it('refuses further input once the hand is over', () => {
     const hand = new OutsHand('over', settings, charts, ITER);
-    hand.submit({ ...perfect(hand), equity: 0 });
-    expect(() => hand.submit(perfect(hand))).toThrow(/already over/);
+    const truthBefore = hand.current.truth!;
+    hand.submit({ ...perfect(hand), equityBand: 'wayBehind' }, hand.current.truth!);
+    expect(() => hand.submit(perfect(hand), truthBefore)).toThrow(/already over/);
   });
 
   it('replays a seed exactly', () => {
@@ -297,7 +332,7 @@ describe('counting outs yourself', () => {
       outs: null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -313,7 +348,7 @@ describe('counting outs yourself', () => {
       outs: given,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -330,7 +365,7 @@ describe('counting outs yourself', () => {
       discountedSoftOuts: discounted,
       timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -369,7 +404,7 @@ describe('counting outs yourself', () => {
       outs: truth.hitProbability!.outs + 4,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -385,11 +420,11 @@ describe('counting outs yourself', () => {
       outs: truth.hitProbability!.outs + 2,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
-    });
+    }, truth);
     expect(grade.passed).toBe(false);
     expect(grade.outs!.correct).toBe(false);
     expect(grade.equity!.correct).toBe(true);
@@ -405,7 +440,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact + HIT_PROBABILITY_TOLERANCE - 0.01,
-      equity: truth.equity.percent + EQUITY_TOLERANCE - 0.01,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent + POT_ODDS_TOLERANCE - 0.01,
       action: truth.action.best,
       timedOut: false,
@@ -419,7 +454,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent + EQUITY_TOLERANCE + 0.5,
+      equityBand: 'wayAhead',
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -435,7 +470,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: answer,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -453,7 +488,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.ruleOfThumb,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -477,7 +512,7 @@ describe('grading', () => {
         outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
         hitProbability: answer,
-        equity: truth.equity.percent,
+        equityBand: bandOf(truth.equity.percent),
         potOdds: truth.potOdds.percent,
         action: truth.action.best,
         timedOut: false,
@@ -496,7 +531,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact + 20,
-      equity: truth.equity.percent,
+      equityBand: bandOf(truth.equity.percent),
       potOdds: truth.potOdds.percent,
       action: truth.action.best,
       timedOut: false,
@@ -511,7 +546,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent - 20,
+      equityBand: 'wayBehind',
       potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
     });
     expect(under.mistakes).toContain('EQUITY_UNDER');
@@ -519,7 +554,7 @@ describe('grading', () => {
       outs: truth.hitProbability?.outs ?? null,
       discountedSoftOuts: false, timings: {},
       hitProbability: truth.hitProbability!.exact,
-      equity: truth.equity.percent + 20,
+      equityBand: 'wayAhead',
       potOdds: truth.potOdds.percent, action: truth.action.best, timedOut: false,
     });
     expect(over.mistakes).toContain('EQUITY_OVER');
@@ -528,7 +563,7 @@ describe('grading', () => {
   it('produces a populated diagnosis and the solver rules verbatim', () => {
     const truth = truthFor('diagnosis');
     const grade = gradeHand(truth, {
-      outs: 0, hitProbability: 0, equity: 0, potOdds: 0, action: 'raise', timedOut: false,
+      outs: 0, hitProbability: 0, equityBand: 'even', potOdds: 0, action: 'raise', timedOut: false,
       discountedSoftOuts: false, timings: {},
     });
     expect(grade.diagnosis.length).toBeGreaterThan(0);
@@ -542,12 +577,12 @@ describe('grading', () => {
   it('reports every field side by side, answered or not', () => {
     const truth = truthFor('side-by-side');
     const grade = gradeHand(truth, {
-      outs: null, hitProbability: null, equity: null, potOdds: null, action: null,
+      outs: null, hitProbability: null, equityBand: null, potOdds: null, action: null,
       discountedSoftOuts: false, timings: {},
       timedOut: false,
     });
     expect(grade.equity!.given).toBeNull();
-    expect(grade.equity!.truth).toBeCloseTo(truth.equity.percent, 9);
+    expect(grade.equity!.truthPercent).toBeCloseTo(truth.equity.percent, 9);
     expect(grade.potOdds!.correct).toBe(false);
     expect(grade.action.correct).toBe(false);
   });
@@ -610,6 +645,54 @@ describe('Preflop mode', () => {
     const a = buildPreflopHand('pf-replay', settings, charts);
     const b = buildPreflopHand('pf-replay', settings, charts);
     expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+  });
+});
+
+describe('equity bands', () => {
+  it('maps a percentage to the band it falls in', () => {
+    expect(bandOf(10)).toBe('wayBehind');
+    expect(bandOf(24.9)).toBe('wayBehind');
+    expect(bandOf(25)).toBe('behind');
+    expect(bandOf(39.9)).toBe('behind');
+    expect(bandOf(40)).toBe('even');
+    expect(bandOf(59.9)).toBe('even');
+    expect(bandOf(60)).toBe('ahead');
+    expect(bandOf(79.9)).toBe('ahead');
+    expect(bandOf(80)).toBe('wayAhead');
+    expect(bandOf(100)).toBe('wayAhead');
+  });
+
+  it('covers 0 to 100 with no gap and no overlap', () => {
+    for (let percent = 0; percent <= 100; percent += 0.1) {
+      const band = EQUITY_BANDS.find((b) => b.id === bandOf(percent))!;
+      expect(percent).toBeGreaterThanOrEqual(band.min);
+      expect(percent).toBeLessThanOrEqual(band.max);
+    }
+  });
+
+  it('accepts either side at a boundary, so a tenth of a point cannot fail', () => {
+    // The knife-edge problem that sank the two-anchor hit-probability scheme,
+    // moved to band edges. 40.1% must not fail an answer of "behind".
+    expect(acceptableBands(40.1)).toContain('behind');
+    expect(acceptableBands(40.1)).toContain('even');
+    expect(acceptableBands(59.5)).toContain('even');
+    expect(acceptableBands(59.5)).toContain('ahead');
+    // Away from a boundary only one band is right.
+    expect(acceptableBands(50)).toEqual(['even']);
+    expect(acceptableBands(10)).toEqual(['wayBehind']);
+  });
+
+  it('grades the judgement, not the number', () => {
+    const truth = new OutsHand('band-grade', settings, charts, ITER).current.truth!;
+    const right = bandOf(truth.equity.percent);
+    const wrong = right === 'wayAhead' ? 'wayBehind' : 'wayAhead';
+    const grade = (given: typeof right) => gradeHand(truth, {
+      ...perfect(new OutsHand('band-grade', settings, charts, ITER)),
+      equityBand: given,
+    }).equity!;
+    expect(grade(right).correct).toBe(true);
+    expect(grade(wrong).correct).toBe(false);
+    expect(grade(right).truthPercent).toBeCloseTo(truth.equity.percent, 9);
   });
 });
 

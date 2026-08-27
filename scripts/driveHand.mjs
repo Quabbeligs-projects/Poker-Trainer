@@ -18,7 +18,7 @@ import { chromium } from 'playwright';
 import rangesJson from '../src/data/ranges.json' with { type: 'json' };
 import { RangeCharts } from '../src/engine/ranges.ts';
 import { OutsHand } from '../src/game/session.ts';
-import { DEFAULT_SETTINGS } from '../src/game/types.ts';
+import { DEFAULT_SETTINGS, EQUITY_BANDS, bandOf } from '../src/game/types.ts';
 
 const SEED = process.env.SEED ?? 'DRIVE-TURN-1';
 const charts = new RangeCharts(rangesJson);
@@ -33,8 +33,9 @@ const expect = {
   equity: String(Math.round(t.equity.percent)),
   potOdds: String(Math.round(t.potOdds.percent)),
   action: t.action.best,
+  band: EQUITY_BANDS.find((b) => b.id === bandOf(t.equity.percent)).label,
 };
-console.log(`seed ${SEED}: outs ${expect.outs}, hit ${expect.hit}%, equity ${expect.equity}%, potOdds ${expect.potOdds}%, best ${expect.action}`);
+console.log(`seed ${SEED}: outs ${expect.outs}, hit ${expect.hit}%, ${expect.band} (${expect.equity}%), potOdds ${expect.potOdds}%, best ${expect.action}`);
 
 const BASE = process.env.VITE_BASE ?? '/Poker-Trainer/';
 const TYPES={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.json':'application/json','.webmanifest':'application/manifest+json'};
@@ -63,12 +64,20 @@ await page.goto(`http://localhost:${PORT}${BASE}?seed=${SEED}`,{waitUntil:'netwo
 await page.waitForSelector('.ask h2',{timeout:30000});
 
 const answerStreet = async (exp) => {
-  for (const v of [exp.outs, exp.hit, exp.equity, exp.potOdds]) {
+  for (const v of [exp.outs, exp.hit]) {
     await page.waitForSelector('.number-field input',{timeout:15000});
     await page.locator('.number-field input').fill(v);
     await page.locator('button.primary').click();
     await page.waitForTimeout(100);
   }
+  // Equity is a band, not a number.
+  await page.waitForSelector('.band-button',{timeout:15000});
+  await page.locator('.band-button').filter({hasText:new RegExp(`^${exp.band}`,'i')}).first().click();
+  await page.waitForTimeout(100);
+  await page.waitForSelector('.number-field input',{timeout:15000});
+  await page.locator('.number-field input').fill(exp.potOdds);
+  await page.locator('button.primary').click();
+  await page.waitForTimeout(100);
   await page.waitForSelector('.action-button',{timeout:15000});
   await page.locator('.action-button').filter({hasText:new RegExp(`^${exp.action}$`,'i')}).first().click();
   await page.waitForSelector('.verdict',{timeout:25000});

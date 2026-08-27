@@ -116,6 +116,64 @@ export interface HitProbabilityTruth {
   readonly cardsToCome: number;
 }
 
+/**
+ * Equity is asked for as a BAND, not a number.
+ *
+ * A numeric equity input asks for something no human can compute at a table:
+ * 64.5% against a 445-combo range is a Monte Carlo result, not an estimate. The
+ * per-field timings made the case — 557 seconds on that one field in a real
+ * session. What a player CAN judge, and must, is roughly where they stand.
+ *
+ * Outs, hit probability and pot odds stay exact, because all three are
+ * calculable. The exact equity, the as-is/improved split and the range grid all
+ * still appear in the feedback: the information is valuable, the input was not.
+ */
+export const EQUITY_BANDS = [
+  { id: 'wayBehind', label: 'way behind', min: 0, max: 25 },
+  { id: 'behind', label: 'behind', min: 25, max: 40 },
+  { id: 'even', label: 'even', min: 40, max: 60 },
+  { id: 'ahead', label: 'ahead', min: 60, max: 80 },
+  { id: 'wayAhead', label: 'way ahead', min: 80, max: 100 },
+] as const;
+
+export type EquityBandId = (typeof EQUITY_BANDS)[number]['id'];
+
+/**
+ * How close to a band edge counts as "on the boundary".
+ *
+ * Without this, a true equity of 40.1% would fail an answer of "behind" by a
+ * tenth of a point — the same knife-edge problem that sank the two-anchor
+ * hit-probability scheme, moved to band edges. Within this margin of an edge,
+ * either adjoining band is accepted.
+ */
+export const BAND_BOUNDARY_TOLERANCE = 2;
+
+/** The band a true equity falls in. */
+export function bandOf(percent: number): EquityBandId {
+  for (const band of EQUITY_BANDS) {
+    if (percent < band.max) return band.id;
+  }
+  return 'wayAhead';
+}
+
+/** Every band an answer of `percent` could legitimately be called. */
+export function acceptableBands(percent: number): EquityBandId[] {
+  const accepted = new Set<EquityBandId>([bandOf(percent)]);
+  accepted.add(bandOf(Math.max(0, percent - BAND_BOUNDARY_TOLERANCE)));
+  accepted.add(bandOf(Math.min(100, percent + BAND_BOUNDARY_TOLERANCE)));
+  return [...accepted];
+}
+
+export interface BandGrade {
+  readonly correct: boolean;
+  readonly given: EquityBandId | null;
+  /** The band the true equity actually falls in. */
+  readonly truthBand: EquityBandId;
+  readonly truthPercent: number;
+  /** Every band accepted, which is more than one only near a boundary. */
+  readonly accepted: readonly EquityBandId[];
+}
+
 export interface EquityTruth {
   /** Hero's equity percentage against the narrowed opponent range(s). */
   readonly percent: number;
@@ -211,8 +269,8 @@ export interface HandInput {
   readonly timings: FieldTimings;
   /** Hero's hit-probability estimate, percent. Null when not asked. */
   readonly hitProbability: number | null;
-  /** Hero's equity estimate, percent. Null in Preflop mode. */
-  readonly equity: number | null;
+  /** Hero's judgement of where they stand. Null in Preflop mode. */
+  readonly equityBand: EquityBandId | null;
   /** Hero's pot odds answer, percent. Null in Preflop mode. */
   readonly potOdds: number | null;
   readonly action: ActionKind | null;
@@ -257,7 +315,7 @@ export interface HandGrade {
   readonly passed: boolean;
   readonly outs: FieldGrade | null;
   readonly hitProbability: FieldGrade | null;
-  readonly equity: FieldGrade | null;
+  readonly equity: BandGrade | null;
   readonly potOdds: FieldGrade | null;
   readonly action: ActionGrade;
   /** Every category that applies, most important first. */
@@ -274,7 +332,11 @@ export interface HandGrade {
 /* Tolerances                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** Equity is an estimate; +/-5pp is the spec's tolerance. */
+/**
+ * Retained for the calibration report, which still measures the engine against
+ * the +/-5pp tolerance a numeric equity input would have used. The trainer
+ * grades equity by band; see `EQUITY_BANDS`.
+ */
 export const EQUITY_TOLERANCE = 5;
 /** Pot odds is arithmetic, not estimation, so it is graded tighter. */
 export const POT_ODDS_TOLERANCE = 2;

@@ -11,17 +11,43 @@
  * the 13x13 grid sizes itself off the container rather than a fixed cell size.
  */
 import type { Card } from '../../engine/deck';
-import type { FieldGrade, HandGrade, HandTruth, InputField } from '../../game/types';
+import {
+  EQUITY_BANDS,
+  type BandGrade,
+  type EquityBandId,
+  type FieldGrade,
+  type HandGrade,
+  type HandTruth,
+  type InputField,
+} from '../../game/types';
 import { CardRow } from './PlayingCard';
 import { RangeGrid } from './RangeGrid';
 
 const FIELD_LABEL: Record<InputField, string> = {
   outs: 'Outs',
   hitProbability: 'Hit probability',
-  equity: 'Equity',
+  equity: 'Where you stand',
   potOdds: 'Pot odds',
   action: 'Action',
 };
+
+/**
+ * What hero holds, in the most informative words available.
+ *
+ * The evaluator's category alone calls KK on T-5-4 "One Pair", which reads as a
+ * hand that still needs to improve. The made-hand class knows it is an
+ * overpair, so it wins where the two differ.
+ */
+function describeHand(truth: HandTruth): string {
+  switch (truth.heroClass) {
+    case 'overpair': return 'Overpair';
+    case 'topPair': return 'Top pair';
+    case 'weakPair': return truth.heroCategory;
+    case 'strongDraw': return `${truth.heroCategory}, strong draw`;
+    case 'weakDraw': return `${truth.heroCategory}, weak draw`;
+    default: return truth.heroCategory;
+  }
+}
 
 function fmt(value: number | null, suffix: string): string {
   if (value === null) return '—';
@@ -47,6 +73,27 @@ function AnswerRow({ label, grade, suffix }: {
           `${grade.error > 0 ? '+' : ''}${Math.round(grade.error * 10) / 10}`
         )}
       </span>
+    </div>
+  );
+}
+
+const bandLabel = (id: EquityBandId | null): string =>
+  EQUITY_BANDS.find((band) => band.id === id)?.label ?? '—';
+
+/** The equity judgement: which band you called, and where it actually landed. */
+function BandRow({ grade }: { grade: BandGrade }): JSX.Element {
+  return (
+    <div className={`answer ${grade.correct ? 'ok' : 'miss'}`}>
+      <span className="answer-label">{FIELD_LABEL.equity}</span>
+      <span className="answer-values">
+        <span className="answer-given">{bandLabel(grade.given)}</span>
+        <span className="answer-arrow" aria-hidden="true">→</span>
+        <span className="answer-truth">
+          {bandLabel(grade.truthBand)}
+          <small> {Math.round(grade.truthPercent * 10) / 10}%</small>
+        </span>
+      </span>
+      <span className="answer-verdict">{grade.correct ? '✓' : '✗'}</span>
     </div>
   );
 }
@@ -152,7 +199,7 @@ export function FeedbackScreen({ truth, grade, onNext, nextLabel }: {
         <span className="verdict-mark" aria-hidden="true">{grade.passed ? '✓' : '✗'}</span>
         <span className="verdict-text">
           {grade.passed ? 'Correct' : 'Missed'}
-          <small>{truth.street} · {truth.heroCategory}</small>
+          <small>{truth.street} · {describeHand(truth)}</small>
         </span>
       </header>
 
@@ -169,9 +216,7 @@ export function FeedbackScreen({ truth, grade, onNext, nextLabel }: {
         {grade.hitProbability !== null && (
           <AnswerRow label={FIELD_LABEL.hitProbability} grade={grade.hitProbability} suffix="%" />
         )}
-        {grade.equity !== null && (
-          <AnswerRow label={FIELD_LABEL.equity} grade={grade.equity} suffix="%" />
-        )}
+        {grade.equity !== null && <BandRow grade={grade.equity} />}
         {grade.potOdds !== null && (
           <AnswerRow label={FIELD_LABEL.potOdds} grade={grade.potOdds} suffix="%" />
         )}
