@@ -20,8 +20,8 @@ equity layer, before narrowing was built on top.
 
 ```
 src/engine/   pure TypeScript, zero React imports, unit-tested from Node
-src/game/     game mode state machines            (not built yet)
-src/ui/       React components                    (not built yet)
+src/game/     truth, grading, spot generation, session state, history
+src/ui/       React components
 src/data/     editable JSON: ranges, config
 test/         vitest suites, run with `npm test`
 ```
@@ -32,7 +32,8 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 314 tests, ~30s
+npm run dev         # local dev server
+npm test            # 340 tests, ~25s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -41,8 +42,6 @@ npm run build       # typecheck + production build
 npm run verify:pwa  # build must work offline in a real browser
 npm run smoke       # play one hand end to end in a real browser
 npm run bench       # performance numbers (informational, never a gate)
-npm run dev       # (once UI exists)
-npm run build
 ```
 
 ## Engine notes
@@ -550,7 +549,7 @@ earlier one, and makes the per-field timing exact rather than inferred.
 **Per-field timings** appear on the feedback screen, so the time-trial range can
 be set from evidence now that there are five fields rather than three.
 
-`?seed=XXX` replays a hand exactly — the mechanism Review mode will use.
+`?seed=XXX` replays a hand exactly — the mechanism Review mode replays with.
 `?mode=preflop` skips straight into that mode.
 
 **Settings** hides what does not apply: the time-trial length and the fixed-seat
@@ -569,6 +568,78 @@ Four-colour deck: spades black, hearts red, diamonds blue, clubs green, on light
 card faces so a black spade still reads against the dark table. The 13×13 grid
 sizes off its container (27px cells at 390px wide), so nothing scrolls
 horizontally on an iPhone.
+
+## Stats and review
+
+Every graded decision is recorded — both modes, correct and incorrect — in
+`src/game/history.ts`. A record holds the seed, the settings the hand was dealt
+under, what was asked, what was answered, what was true, which mistake
+categories fired, and the per-field seconds. That is everything needed to
+regrade a hand later without storing the truth object itself, which would go
+stale the moment a solver weight changes.
+
+**Storage is `localStorage`, keyed `poker-trainer/history/v1`, capped at 2000
+records** (oldest dropped). The key is versioned so a future format change can
+be detected rather than misread.
+
+**Reads and writes never throw.** Safari in private mode makes `localStorage`
+throw on write, and a full quota does the same. Both are caught and the module
+falls back to an in-memory array for the session; `isUsingMemoryFallback()`
+reports it and the stats screen says so, because silently losing history is
+worse than saying it is not being kept.
+
+**One malformed row does not lose the file.** `loadHistory` validates each row
+and drops the ones that fail, rather than rejecting the whole array. Losing one
+hand to a bad write beats losing two thousand.
+
+**Export/import is idempotent.** Records carry an id; importing merges by id and
+re-sorts by time, so importing the same file twice is a no-op and importing an
+overlapping backup does not duplicate. Import is also how history moves between
+the phone and the desktop, since `localStorage` is per-origin-per-device.
+
+### What the stats screen shows
+
+Accuracy is the hero number, because it is the one thing worth reading first.
+Under it: current and best streak, counts per mode, and then two charts.
+
+**Mistakes by kind** is a nominal single series — one bar per category that has
+actually occurred, one hue, sorted by count. Categories with zero occurrences
+are not drawn; an empty bar teaches nothing.
+
+**Bias per field** is diverging around zero, because the sign is the point: it
+answers "do I overcount outs or undercount them?", which a magnitude-only chart
+cannot. Signed mean is the bar; absolute mean is printed beside it, so a field
+that is wildly wrong in both directions cannot hide behind a mean near zero.
+Equity-band bias is shown in band steps rather than points.
+
+Median seconds per field is printed per field, not averaged across them — the
+fields are not the same kind of work, and one long think should not move it.
+
+Palette: `--chart-gold #BE8A30` and `--chart-blue #5B8FC7` against surface
+`#16211F`, with `--chart-zero #4A5754` for the axis. Both were checked for
+lightness inside the dark-theme band, chroma floor, contrast against the
+surface, and separation under simulated protanopia and deuteranopia
+(ΔE 22.6 protan, 25.7 normal). The first choice, `#D9A441`, failed the dark
+lightness band at L 0.751 and was replaced rather than kept for looks.
+
+### Review mode
+
+The list is newest-first and shows only missed hands, since a correct hand has
+nothing to review.
+
+**Filter by mistake category, not just chronologically.** The filter chips are
+built from the mistakes that actually occurred in the stored history, each with
+its count, so there is never a chip that filters to nothing.
+
+**The seed is on every row**, in a monospace chip with `user-select: all`, so
+one tap selects the whole thing on a phone. A verdict that looks wrong can be
+quoted exactly.
+
+**Replay** re-deals the hand from its seed *and its stored settings* — table
+size, seat and mode all come from the record, not from current settings, or the
+replay would not be the same hand. Replaying the same hand twice in a row works;
+the session is keyed so the second replay is a fresh deal of the same seed
+rather than a no-op.
 
 ## Environment assumptions
 
@@ -592,7 +663,3 @@ two CI failures came from assuming otherwise. What is deliberately not assumed:
 
 `toLocaleString` is still used for display formatting, where varying by locale
 is the point.
-
-## Still to build
-
-- Stats and review mode

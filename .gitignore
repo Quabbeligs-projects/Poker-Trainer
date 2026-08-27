@@ -6,3 +6,4 @@ dist-ssr
 .vite
 coverage
 range-grids.html
+tsconfig.tsbuildinfo

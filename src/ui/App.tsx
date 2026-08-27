@@ -23,11 +23,25 @@ import {
 } from '../game/session';
 import { DEFAULT_SETTINGS, type HandGrade, type HandInput, type HandTruth, type Settings }
   from '../game/types';
+import {
+  appendRecord,
+  clearHistory,
+  exportHistory,
+  importHistory,
+  loadHistory,
+  recordOutsHand,
+  recordPreflopHand,
+  saveHistory,
+  type HandRecord,
+} from '../game/history';
+import { bandOf } from '../game/types';
 import { FeedbackScreen } from './components/FeedbackScreen';
 import { OutsHandScreen } from './components/OutsHandScreen';
 import { PreflopFeedback } from './components/PreflopFeedback';
 import { PreflopScreen } from './components/PreflopScreen';
+import { ReviewScreen } from './components/ReviewScreen';
 import { SettingsScreen, type Mode } from './components/SettingsScreen';
+import { StatsScreen } from './components/StatsScreen';
 import { useHandTimer } from './components/useHandTimer';
 
 const charts = new RangeCharts(rangesJson as unknown as RangeChartsJson);
@@ -44,41 +58,146 @@ function fromUrl(name: string): string | null {
   return value !== null && value.length > 0 ? value : null;
 }
 
+type Screen = 'settings' | 'playing' | 'stats' | 'review';
+
 export function App(): JSX.Element {
-  const pinnedSeed = fromUrl('seed');
+  const urlSeed = fromUrl('seed');
   const pinnedMode = fromUrl('mode');
-  const [started, setStarted] = useState(pinnedSeed !== null || pinnedMode !== null);
+  const [screen, setScreen] = useState<Screen>(
+    urlSeed !== null || pinnedMode !== null ? 'playing' : 'settings',
+  );
   const [settings, setSettings] = useState<Settings>(
     { ...DEFAULT_SETTINGS, playerCount: 6 },
   );
   const [mode, setMode] = useState<Mode>(pinnedMode === 'preflop' ? 'preflop' : 'outs');
+  const [pinnedSeed, setPinnedSeed] = useState<string | null>(urlSeed);
+  const [records, setRecords] = useState<HandRecord[]>(() => loadHistory());
+  /** Bumped to force a fresh session when replaying the same seed twice. */
+  const [sessionKey, setSessionKey] = useState(0);
+
+  const record = useCallback((entry: HandRecord) => {
+    setRecords(appendRecord(entry));
+  }, []);
 
   const start = useCallback((chosen: Settings, chosenMode: Mode) => {
     setSettings(chosen);
     setMode(chosenMode);
-    setStarted(true);
+    setPinnedSeed(null);
+    setSessionKey((key) => key + 1);
+    setScreen('playing');
   }, []);
 
-  if (!started) {
-    return <main><SettingsScreen initial={settings} onStart={start} /></main>;
+  /** Replays a recorded hand at the table it was dealt at. */
+  const replay = useCallback((entry: HandRecord) => {
+    setSettings(entry.settings);
+    setMode(entry.mode);
+    setPinnedSeed(entry.seed);
+    setSessionKey((key) => key + 1);
+    setScreen('playing');
+  }, []);
+
+  const exportJson = useCallback(() => {
+    const text = exportHistory(records);
+    // A data: URL download is blocked in some embedded viewers, so offer the
+    // text itself as a fallback rather than failing silently.
+    try {
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `poker-trainer-history-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.prompt('Copy your history:', text);
+    }
+  }, [records]);
+
+  const importJson = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file === undefined) return;
+      void file.text().then((text) => {
+        try {
+          const result = importHistory(text, records);
+          saveHistory(result.records);
+          setRecords(result.records);
+          window.alert(`Imported ${result.added} hands, skipped ${result.skipped}.`);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : 'Import failed.');
+        }
+      });
+    };
+    input.click();
+  }, [records]);
+
+  const wipe = useCallback(() => {
+    if (!window.confirm('Delete every recorded hand? This cannot be undone.')) return;
+    clearHistory();
+    setRecords([]);
+  }, []);
+
+  if (screen === 'settings') {
+    return (
+      <main>
+        <SettingsScreen initial={settings} onStart={start} />
+        <div className="nav-row">
+          <button type="button" className="link" onClick={() => setScreen('stats')}>
+            Stats
+          </button>
+          <button type="button" className="link" onClick={() => setScreen('review')}>
+            Review{records.filter((r) => !r.passed).length > 0
+              && ` (${records.filter((r) => !r.passed).length})`}
+          </button>
+        </div>
+      </main>
+    );
+  }
+  if (screen === 'stats') {
+    return (
+      <main>
+        <StatsScreen
+          records={records}
+          onBack={() => setScreen('settings')}
+          onExport={exportJson}
+          onImport={importJson}
+          onClear={wipe}
+        />
+      </main>
+    );
+  }
+  if (screen === 'review') {
+    return (
+      <main>
+        <ReviewScreen
+          records={records}
+          onBack={() => setScreen('settings')}
+          onReplay={replay}
+        />
+      </main>
+    );
   }
   return (
     <main>
       {mode === 'outs'
-        ? <OutsSession settings={settings} pinnedSeed={pinnedSeed}
-            onQuit={() => setStarted(false)} />
-        : <PreflopSession settings={settings} pinnedSeed={pinnedSeed}
-            onQuit={() => setStarted(false)} />}
+        ? <OutsSession key={sessionKey} settings={settings} pinnedSeed={pinnedSeed}
+            onQuit={() => setScreen('settings')} onRecord={record} />
+        : <PreflopSession key={sessionKey} settings={settings} pinnedSeed={pinnedSeed}
+            onQuit={() => setScreen('settings')} onRecord={record} />}
     </main>
   );
 }
 
 /* -------------------------------------------------------------------------- */
 
-function OutsSession({ settings, pinnedSeed, onQuit }: {
+function OutsSession({ settings, pinnedSeed, onQuit, onRecord }: {
   settings: Settings;
   pinnedSeed: string | null;
   onQuit: () => void;
+  onRecord: (record: HandRecord) => void;
 }): JSX.Element {
   const [session, setSession] = useState(() => {
     const seed = pinnedSeed ?? generateSeed(sessionRng);
@@ -90,10 +209,14 @@ function OutsSession({ settings, pinnedSeed, onQuit }: {
 
   const submit = useCallback((input: HandInput, answering: HandTruth) => {
     const result = session.hand.submit(input, answering);
+    onRecord(recordOutsHand(
+      answering, { ...input }, result.grade, settings,
+      bandOf(answering.equity.percent),
+    ));
     setGradedTruth(answering);
     setLastGrade(result.grade);
     setSession({ hand: session.hand, state: result.state });
-  }, [session.hand]);
+  }, [session.hand, onRecord, settings]);
 
   const nextHand = useCallback(() => {
     const seed = generateSeed(sessionRng);
@@ -149,18 +272,21 @@ function OutsSession({ settings, pinnedSeed, onQuit }: {
 
 /* -------------------------------------------------------------------------- */
 
-function PreflopSession({ settings, pinnedSeed, onQuit }: {
+function PreflopSession({ settings, pinnedSeed, onQuit, onRecord }: {
   settings: Settings;
   pinnedSeed: string | null;
   onQuit: () => void;
+  onRecord: (record: HandRecord) => void;
 }): JSX.Element {
   const [truth, setTruth] = useState<PreflopTruth>(() =>
     buildPreflopHand(pinnedSeed ?? generateSeed(sessionRng), settings, charts));
   const [grade, setGrade] = useState<PreflopGrade | null>(null);
 
   const answer = useCallback((action: ActionKind | null, timedOut: boolean) => {
-    setGrade(gradePreflop(truth, action, timedOut));
-  }, [truth]);
+    const result = gradePreflop(truth, action, timedOut);
+    onRecord(recordPreflopHand(truth, action, result, settings));
+    setGrade(result);
+  }, [truth, onRecord, settings]);
 
   const nextHand = useCallback(() => {
     setGrade(null);

@@ -437,3 +437,126 @@ input[type="range"] { accent-color: var(--gold); height: 44px; }
 }
 .rg-cell.mine .rg-label { color: var(--ink); font-weight: 700; }
 .rg-cell.mine.in .rg-label { color: #10201C; }
+
+/* ==========================================================================
+   Stats
+   Chart marks use their own gold, one step darker than the UI accent: the
+   accent sits outside the dark-mode lightness band for chart marks. The pair
+   below was checked with the palette validator against --surface and passes
+   lightness band, chroma floor, CVD separation, normal-vision separation and
+   contrast. Every bar is directly labelled rather than relying on hover, which
+   never fires on touch.
+   ========================================================================== */
+
+:root {
+  --chart-gold: #BE8A30;
+  --chart-blue: #5B8FC7;
+  --chart-zero: #4A5754;
+}
+
+.stats h1, .review h1 { font-size: 26px; margin: 10px 0 18px; }
+.stats section, .review section {
+  border-top: 1px solid var(--line); padding-top: 20px; margin-top: 26px;
+}
+.stats h3 { font-size: 15px; margin: 0 0 6px; }
+
+.hero-number {
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 22px;
+}
+.hero-value {
+  font-size: 56px; font-weight: 700; line-height: 1;
+  letter-spacing: -0.03em; color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.hero-label { font-size: 14px; color: var(--ink-3); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+.tile {
+  display: flex; flex-direction: column; gap: 3px; padding: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+}
+.tile-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile-value.good { color: var(--good); }
+.tile-label { font-size: 11.5px; color: var(--ink-3); text-transform: lowercase; }
+
+/* Bars: thin marks, rounded data-end, 2px gap between rows. */
+.bars { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.bar-row {
+  display: grid; grid-template-columns: 8.5rem 1fr auto; align-items: center;
+  gap: 10px; padding: 5px 0; font-size: 13px;
+}
+.bar-label { color: var(--ink-2); }
+.bar-track { height: 10px; background: var(--surface-2, #1B2726); border-radius: 5px; }
+.bar-fill {
+  display: block; height: 100%; background: var(--chart-gold);
+  border-radius: 0 5px 5px 0; min-width: 3px;
+}
+.bar-value {
+  font-variant-numeric: tabular-nums; color: var(--ink);
+  text-align: right; white-space: nowrap;
+}
+.bar-value em { font-style: normal; color: var(--ink-3); font-size: 11.5px; }
+
+/* Diverging: two hues, neutral midpoint, equal arms. */
+.bias { margin-top: 12px; }
+.bias-scale {
+  display: flex; justify-content: space-between; font-size: 11px;
+  color: var(--ink-3); margin: 0 0 6px 9rem; text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bias-track {
+  position: relative; height: 10px; background: var(--surface-2, #1B2726);
+  border-radius: 5px;
+}
+.bias-zero {
+  position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px;
+  background: var(--chart-zero);
+}
+.bias-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; min-width: 2px; }
+.bias-fill.low { background: var(--chart-blue); }
+.bias-fill.high { background: var(--chart-gold); }
+
+.link.danger { color: var(--bad); margin-top: 14px; }
+.nav-row { display: flex; gap: 18px; margin-top: 26px;
+  border-top: 1px solid var(--line); padding-top: 16px; }
+
+/* ==========================================================================
+   Review
+   ========================================================================== */
+
+.filters { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+.chip-button {
+  font: inherit; font-size: 13px; min-height: 40px; padding: 0 13px; width: auto;
+  background: var(--surface); color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+}
+.chip-button.on { color: #10201C; background: var(--gold); border-color: var(--gold); }
+.chip-button em { font-style: normal; opacity: 0.65; margin-left: 3px; }
+.chip-button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+.review-list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 10px; }
+.review-list li {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 13px;
+}
+.review-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.review-cards { font-weight: 600; font-size: 16px; }
+.review-when { font-size: 12px; color: var(--ink-3); }
+.review-board { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+.review-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0; }
+.tag {
+  font-size: 11px; padding: 3px 8px; border-radius: 999px;
+  background: rgba(210, 112, 90, 0.15); color: var(--bad);
+}
+.tag.muted { background: transparent; color: var(--ink-3); border: 1px solid var(--line); }
+.review-answer { font-size: 13px; color: var(--ink-2); }
+.review-answer b { color: var(--ink); text-transform: capitalize; }
+.review-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 11px;
+}
+.seed-chip {
+  font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-3);
+  background: var(--ground); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 9px; user-select: all;
+}
