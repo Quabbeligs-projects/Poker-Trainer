@@ -36,11 +36,26 @@ const expect = {
 };
 console.log(`seed ${SEED}: outs ${expect.outs}, hit ${expect.hit}%, equity ${expect.equity}%, potOdds ${expect.potOdds}%, best ${expect.action}`);
 
-const BASE='/Poker-Trainer/', PORT=4191;
+const BASE = process.env.VITE_BASE ?? '/Poker-Trainer/';
 const TYPES={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.json':'application/json','.webmanifest':'application/manifest+json'};
 const server=createServer(async(req,res)=>{let p=decodeURIComponent((req.url??'/').split('?')[0]);if(!p.startsWith(BASE)){res.writeHead(404).end();return;}p=p.slice(BASE.length)||'index.html';const f=join('dist',normalize(p).replace(/^(\.\.[/\\])+/,''));try{const b=await readFile(f);res.writeHead(200,{'Content-Type':TYPES[extname(f)]??'application/octet-stream'}).end(b);}catch{res.writeHead(404).end();}});
-await new Promise(r=>server.listen(PORT,r));
-const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+// Port 0 asks the OS for a free port, so two runs — or two jobs on one shared
+// runner — cannot collide.
+await new Promise(r=>server.listen(0,r));
+const PORT = server.address().port;
+/**
+ * Launch options for Chromium.
+ *
+ * No path is hardcoded. Where browsers were installed with `npx playwright
+ * install chromium`, Playwright resolves them itself and no options are needed.
+ * An environment that keeps Chromium somewhere else — a sandbox with a
+ * pre-baked binary outside Playwright's versioned layout — sets
+ * PLAYWRIGHT_CHROMIUM_PATH and this uses it.
+ */
+const chromiumLaunchOptions = process.env.PLAYWRIGHT_CHROMIUM_PATH
+  ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
+  : {};
+const browser = await chromium.launch(chromiumLaunchOptions);
 const ctx=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
 const page=await ctx.newPage();
 const errors=[]; page.on('pageerror',e=>errors.push(String(e)));

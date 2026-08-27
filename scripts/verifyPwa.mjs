@@ -26,7 +26,6 @@ import { chromium } from 'playwright';
 
 // Must match the base the bundle was built with.
 const BASE = process.env.VITE_BASE ?? '/Poker-Trainer/';
-const PORT = 4178;
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.json': 'application/json',
@@ -50,7 +49,10 @@ const server = createServer(async (req, res) => {
   }
 });
 
-await new Promise((r) => server.listen(PORT, r));
+// Port 0 asks the OS for a free port, so two runs — or two jobs on one shared
+// runner — cannot collide.
+await new Promise((r) => server.listen(0, r));
+const PORT = server.address().port;
 const url = `http://localhost:${PORT}${BASE}`;
 let blockingFailures = 0;
 let warnings = 0;
@@ -79,13 +81,19 @@ async function waitFor(predicate, { timeout = 5000, interval = 100 } = {}) {
   }
 }
 
-// This sandbox preinstalls Chromium at a fixed path; CI runners use
-// Playwright's own download. Prefer the fixed path when it exists.
-const { existsSync } = await import('node:fs');
-const localChromium = '/opt/pw-browsers/chromium';
-const browser = await chromium.launch(
-  existsSync(localChromium) ? { executablePath: localChromium } : {},
-);
+/**
+ * Launch options for Chromium.
+ *
+ * No path is hardcoded. Where browsers were installed with `npx playwright
+ * install chromium`, Playwright resolves them itself and no options are needed.
+ * An environment that keeps Chromium somewhere else — a sandbox with a
+ * pre-baked binary outside Playwright's versioned layout — sets
+ * PLAYWRIGHT_CHROMIUM_PATH and this uses it.
+ */
+const chromiumLaunchOptions = process.env.PLAYWRIGHT_CHROMIUM_PATH
+  ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
+  : {};
+const browser = await chromium.launch(chromiumLaunchOptions);
 const context = await browser.newContext({
   viewport: { width: 390, height: 844 },   // iPhone-sized
   serviceWorkers: 'allow',

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench": "vitest run --testNamePattern=benchmark",
+    "bench": "vite-node scripts/bench.mjs",
     "grids": "vite-node scripts/renderRangeGrids.mjs",
     "generate:handstrength": "vite-node scripts/generateHandStrength.mjs",
     "sanity": "vite-node scripts/solverSanity.mjs",

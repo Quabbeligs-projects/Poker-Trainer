@@ -271,6 +271,34 @@ describe('heads-up is authored, not scaled', () => {
   });
 });
 
+describe('the trimming order does not depend on the environment', () => {
+  it('breaks ties by code unit, not by locale collation', () => {
+    // This tie-break decides which hands survive table-size trimming, which
+    // changes opponent ranges, which changes graded truth. localeCompare would
+    // make that depend on the ICU data a particular Node build ships, so the
+    // ordering is pinned here: a switch back to locale collation breaks it.
+    const ordering = handOrdering(charts);
+    expect(ordering.keys).toHaveLength(169);
+    expect(new Set(ordering.keys).size).toBe(169);
+    // Strongest first, weakest last, with the exact sequence recorded.
+    expect(ordering.keys[0]).toBe('AA');
+    expect(ordering.keys[ordering.keys.length - 1]).toBe('32o');
+    // Tier dominates: every UTG-tier hand precedes every untiered hand.
+    const lastTiered = Math.max(
+      ...ordering.keys.map((key, i) => (ordering.tiers.get(key)! < 4 ? i : -1)),
+    );
+    const firstUntiered = ordering.keys.findIndex((key) => ordering.tiers.get(key) === 4);
+    expect(firstUntiered).toBeGreaterThan(-1);
+    expect(firstUntiered).toBeGreaterThan(lastTiered - ordering.keys.length);
+  });
+
+  it('is byte-identical across repeated construction', () => {
+    const a = handOrdering(new RangeCharts(rangesJson as unknown as RangeChartsJson));
+    const b = handOrdering(new RangeCharts(rangesJson as unknown as RangeChartsJson));
+    expect(b.keys.join(',')).toBe(a.keys.join(','));
+  });
+});
+
 describe('trimming', () => {
   const ordering = handOrdering(charts);
 

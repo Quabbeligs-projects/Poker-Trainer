@@ -208,7 +208,11 @@ export function handOrdering(charts: RangeCharts): HandOrdering {
     if (tierDelta !== 0) return tierDelta;
     const equityDelta = (EQUITY_VS_RANDOM[b] ?? 0) - (EQUITY_VS_RANDOM[a] ?? 0);
     if (equityDelta !== 0) return equityDelta;
-    return a.localeCompare(b); // stable, so output is reproducible
+    // Code-unit comparison, NOT localeCompare. This tie-break decides which
+    // hands survive table-size trimming, which changes opponent ranges, which
+    // changes graded truth — so it must not depend on the ICU data a
+    // particular Node build happens to ship.
+    return a < b ? -1 : a > b ? 1 : 0;
   });
 
   const ordering: HandOrdering = { keys, tiers };

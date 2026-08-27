@@ -69,6 +69,13 @@ jobs:
       - name: Play a hand end to end
         run: npm run smoke
 
+      # Informational only. Performance numbers are printed so a real
+      # regression is visible in the log, but a busy shared runner must never
+      # block a deploy, so this step cannot fail the build.
+      - name: Benchmarks (not a gate)
+        run: npm run bench
+        continue-on-error: true
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

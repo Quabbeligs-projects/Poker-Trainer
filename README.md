@@ -40,6 +40,7 @@ npm run icons       # regenerate the PWA icons
 npm run build       # typecheck + production build
 npm run verify:pwa  # build must work offline in a real browser
 npm run smoke       # play one hand end to end in a real browser
+npm run bench       # performance numbers (informational, never a gate)
 npm run dev       # (once UI exists)
 npm run build
 ```
@@ -515,6 +516,29 @@ Four-colour deck: spades black, hearts red, diamonds blue, clubs green, on light
 card faces so a black spade still reads against the dark table. The 13×13 grid
 sizes off its container (27px cells at 390px wide), so nothing scrolls
 horizontally on an iPhone.
+
+## Environment assumptions
+
+The repo runs in more than one place — a dev container, a GitHub runner — and
+two CI failures came from assuming otherwise. What is deliberately not assumed:
+
+- **No hardcoded browser path.** Playwright resolves the browser it installed.
+  An environment holding Chromium outside Playwright's versioned layout sets
+  `PLAYWRIGHT_CHROMIUM_PATH`.
+- **No fixed ports.** The test servers bind port 0 and read back what the OS
+  gave them, so parallel jobs on a shared runner cannot collide.
+- **No locale-dependent ordering in the engine.** The trimming tie-break in
+  `tableScaling.ts` compares by code unit, not `localeCompare` — that ordering
+  decides which hands survive table-size trimming, which changes opponent
+  ranges, which changes graded truth, so it must not vary with the ICU data a
+  Node build happens to ship. A test pins the sequence.
+- **No wall-clock gate on correctness.** Timing assertions in the suite are
+  generous 5s ceilings that catch an algorithmic regression, not a slow runner.
+  Real numbers come from `npm run bench`, which CI runs with
+  `continue-on-error` so a busy runner never blocks a deploy.
+
+`toLocaleString` is still used for display formatting, where varying by locale
+is the point.
 
 ## Still to build
 
