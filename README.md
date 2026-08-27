@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 307 tests, ~30s
+npm test            # 310 tests, ~30s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -198,6 +198,15 @@ the folding hands are exactly the ones hero already beats.
 Simplifications, stated plainly: one street at a time (no implied odds, no
 multi-street planning), one bet size fixed at 2/3 pot per the spec, and multiway
 pots resolve as a simple showdown.
+
+**Fold equity belongs to bets and raises only.** `evCall` and `evCheck` carry no
+fold-equity term — nobody folds to a call. A feedback template once pulled
+`action.foldEquity`, which is the fold equity of the *raise* the solver priced,
+into a sentence recommending a call: "call is correct: 26.3% equity plus 20.5%
+fold equity". The solver was right and the sentence was wrong. Passive
+recommendations now reason on the price instead, and a test sweeps every seed
+and answer combination asserting no diagnosis credits fold equity to a call or a
+check.
 
 An action is correct when its EV is within 5% of the best, with an absolute
 floor of 1% of the pot so grading is not knife-edge when the best EV is near

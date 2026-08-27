@@ -666,6 +666,80 @@ describe('Preflop mode', () => {
   });
 });
 
+describe('feedback never attributes a number to the wrong action', () => {
+  /** Sweeps seeds and answers, collecting every diagnosis line produced. */
+  const everyDiagnosis = (): Array<{ line: string; best: string; given: string }> => {
+    const out: Array<{ line: string; best: string; given: string }> = [];
+    for (let i = 0; i < 40; i++) {
+      const truth = new OutsHand(`attr-${i}`, settings, charts, 5_000).current.truth!;
+      for (const given of ['fold', 'call', 'raise', 'check', 'bet'] as const) {
+        const grade = gradeHand(truth, {
+          outs: truth.hitProbability!.outs,
+          cleanOuts: truth.cleanOuts!.total,
+          timings: {},
+          hitProbability: truth.hitProbability!.exact,
+          equityBand: bandOf(truth.equity.percent),
+          potOdds: truth.potOdds.percent,
+          action: given,
+          timedOut: false,
+        });
+        for (const line of grade.diagnosis) {
+          out.push({ line, best: truth.action.best, given });
+        }
+      }
+    }
+    return out;
+  };
+
+  it('never credits fold equity to a call or a check', () => {
+    // Nobody folds to a call. This produced "call is correct: 26.3% equity plus
+    // 20.5% fold equity", where the figure was the fold equity of the RAISE the
+    // solver priced. The solver was right; the sentence pulled the wrong number.
+    // Flags a CREDITED amount of fold equity, not a line observing there is
+    // none — "with no fold equity to make up the difference" is correct beside
+    // a fold, and must not trip this.
+    const CREDITS_FOLD_EQUITY = [
+      /(?:plus|and)\s+[\d.]+%\s+fold equity/i,
+      /folds?\s+them\s+out\s+[\d.]+%/i,
+      /takes it down\s+[\d.]+%/i,
+      /folding\s+[\d.]+%\s+of the time/i,
+    ];
+    const aggressive = new Set(['bet', 'raise']);
+    const offenders = everyDiagnosis().filter(({ line, best, given }) => {
+      if (!CREDITS_FOLD_EQUITY.some((pattern) => pattern.test(line))) return false;
+      // The clause is legitimate only when it describes a bet or a raise —
+      // either the correct action, or the aggressive one hero chose.
+      return !aggressive.has(best) && !aggressive.has(given);
+    });
+    expect(offenders.map((o) => `${o.given}->${o.best}: ${o.line}`)).toEqual([]);
+  });
+
+  it('fills every placeholder in every line it can produce', () => {
+    for (const { line } of everyDiagnosis()) {
+      expect(line, line).not.toMatch(/\{\w+\}/);
+      expect(line.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('explains a passive mistake by price when the correct action is passive', () => {
+    for (let i = 0; i < 60; i++) {
+      const truth = new OutsHand(`passive-${i}`, settings, charts, 5_000).current.truth!;
+      if (truth.action.best !== 'call') continue;
+      const grade = gradeHand(truth, {
+        outs: truth.hitProbability!.outs, cleanOuts: truth.cleanOuts!.total,
+        timings: {}, hitProbability: truth.hitProbability!.exact,
+        equityBand: bandOf(truth.equity.percent), potOdds: truth.potOdds.percent,
+        action: 'fold', timedOut: false,
+      });
+      const joined = grade.diagnosis.join(' ');
+      expect(joined).toMatch(/price|odds/i);
+      expect(joined).not.toMatch(/fold equity/i);
+      return;
+    }
+    throw new Error('No seed produced a spot where calling is correct');
+  });
+});
+
 describe('clean outs are measured, not assumed', () => {
   const withOuts = { ...settings, countOutsYourself: true };
 

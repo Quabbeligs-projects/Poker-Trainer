@@ -24,13 +24,9 @@
     "You chose {given}, but folding is correct here: {equity}% equity against a {potOdds}% price, with no fold equity to make up the difference.",
     "This is a fold. {equity}% equity does not meet the {potOdds}% the price demands, and {given} only puts in more."
   ],
-  "ACTION_TOO_PASSIVE": [
-    "You chose {given}; {best} is better. With {equity}% equity and the opponent folding {foldEquity}% of the time, there is more value in putting chips in.",
-    "{given} leaves value behind. {best} is correct: {equity}% equity plus {foldEquity}% fold equity."
-  ],
   "ACTION_TOO_AGGRESSIVE": [
-    "You chose {given}; {best} is better. {equity}% equity does not justify the extra chips when the opponent folds only {foldEquity}% of the time.",
-    "{given} overplays this. {best} is correct \u2014 fold equity is only {foldEquity}%."
+    "You chose {given}; {best} is better. {equity}% equity does not justify the extra chips when your {given} only folds them out {foldEquity}% of the time.",
+    "{given} overplays this. {best} is correct \u2014 your {given} wins the pot outright only {foldEquity}% of the time."
   ],
   "TIMEOUT": [
     "Time ran out. The hand counts as a loss regardless of what was entered.",
@@ -55,5 +51,13 @@
   "CLEAN_OUTS_OVER": [
     "You said {given} of your {raw} outs win; it is {truth}. Not every out is worth a whole out \u2014 {worstGroup} is the soft end.",
     "{given} against a measured {truth}. {worstGroup}: those improve your hand into something that still loses most of the time."
+  ],
+  "ACTION_TOO_PASSIVE_AGGRESSIVE": [
+    "You chose {given}; {best} is better. With {equity}% equity and the opponent folding {foldEquity}% of the time to a {best}, there is more value in putting chips in.",
+    "{given} leaves value behind. {best} is correct: {equity}% equity, and a {best} takes it down {foldEquity}% of the time outright."
+  ],
+  "ACTION_TOO_PASSIVE_PRICE": [
+    "You chose {given}; {best} is correct. {equity}% equity against a {potOdds}% price is enough to continue \u2014 folding gives up a pot you are getting the right odds on.",
+    "{given} is too tight here. {equity}% equity beats the {potOdds}% the price demands, so {best} is correct."
   ]
 }

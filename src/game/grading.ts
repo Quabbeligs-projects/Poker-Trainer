@@ -265,14 +265,27 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
       }));
     } else if (givenAggression < bestAggression) {
       mistakes.push('ACTION_TOO_PASSIVE');
-      diagnosis.push(template('ACTION_TOO_PASSIVE', truth.seed, {
-        given: given ?? '—',
-        best: truth.action.best,
-        equity: round(truth.equity.percent),
-        foldEquity: round(truth.action.foldEquity * 100),
-      }));
+      // Fold equity exists only for a bet or a raise. Attributing it to a call
+      // produced "call is correct: 26.3% equity plus 20.5% fold equity", where
+      // the 20.5% was the fold equity of the RAISE the solver priced. Nobody
+      // folds to a call, so when the correct action is passive the reasoning
+      // has to run on the price instead.
+      const bestIsAggressive = truth.action.best === 'bet' || truth.action.best === 'raise';
+      diagnosis.push(template(
+        bestIsAggressive ? 'ACTION_TOO_PASSIVE_AGGRESSIVE' : 'ACTION_TOO_PASSIVE_PRICE',
+        truth.seed,
+        {
+          given: given ?? '—',
+          best: truth.action.best,
+          equity: round(truth.equity.percent),
+          potOdds: round(truth.potOdds.percent),
+          foldEquity: round(truth.action.foldEquity * 100),
+        },
+      ));
     } else {
       mistakes.push('ACTION_TOO_AGGRESSIVE');
+      // Here the fold-equity figure describes hero's OWN aggressive action, so
+      // the attribution is sound; the wording names it explicitly.
       diagnosis.push(template('ACTION_TOO_AGGRESSIVE', truth.seed, {
         given: given ?? '—',
         best: truth.action.best,
