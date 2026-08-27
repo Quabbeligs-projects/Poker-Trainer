@@ -13,6 +13,7 @@
 
 import feedbackTemplates from '../data/feedback.json';
 import {
+  CLEAN_OUTS_TOLERANCE,
   EQUITY_BANDS,
   HIT_PROBABILITY_TOLERANCE,
   OUTS_TOLERANCE,
@@ -84,6 +85,18 @@ function gradeOuts(truth: HandTruth, given: number | null): FieldGrade | null {
 }
 
 /**
+ * Grades how many of the outs hero thinks actually win.
+ *
+ * A judgement, not a count, so it carries a tolerance. The truth is measured:
+ * the sum over hero's outs of `P(win | that card arrives)`, taken from the same
+ * Monte Carlo run that produced the equity.
+ */
+function gradeCleanOuts(truth: HandTruth, given: number | null): FieldGrade | null {
+  if (!truth.asksForOuts || truth.cleanOuts === null) return null;
+  return gradeNumeric(given, truth.cleanOuts.total, CLEAN_OUTS_TOLERANCE);
+}
+
+/**
  * Grades the hit-probability answer against the exact probability.
  *
  * A single anchor and a single band. The adjusted rule of 4 and 2 that players
@@ -143,6 +156,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   }
 
   const outs = gradeOuts(truth, input.outs);
+  const cleanOuts = gradeCleanOuts(truth, input.cleanOuts);
   const hitProbability = gradeHitProbability(truth, input.hitProbability);
   const equity = truth.street === 'preflop'
     ? null
@@ -156,19 +170,31 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   if (outs !== null && !outs.correct && truth.hitProbability !== null) {
     mistakes.push('OUTS_MISCOUNT');
     const undercounted = outs.error !== null && outs.error < 0;
-    // Whether a low count was a deliberate discount or a miscount is something
-    // only hero knows, and the two are opposite lessons. The checkbox answers
-    // it rather than the feedback guessing.
-    const key = undercounted && input.discountedSoftOuts
-      ? 'OUTS_DISCOUNTED'
-      : undercounted
-        ? 'OUTS_UNDERCOUNT'
-        : 'OUTS_MISCOUNT';
-    diagnosis.push(template(key, truth.seed, {
+    diagnosis.push(template(undercounted ? 'OUTS_UNDERCOUNT' : 'OUTS_MISCOUNT', truth.seed, {
       given: outs.given === null ? '—' : outs.given,
       truth: truth.hitProbability.outs,
       difference: outs.error === null ? '—' : Math.abs(outs.error),
     }));
+  }
+
+  /* --- clean outs -------------------------------------------------------- */
+  if (cleanOuts !== null && !cleanOuts.correct && truth.cleanOuts !== null) {
+    mistakes.push('CLEAN_OUTS');
+    const best = truth.cleanOuts.groups[0];
+    const worst = truth.cleanOuts.groups[truth.cleanOuts.groups.length - 1];
+    diagnosis.push(template(
+      (cleanOuts.error !== null && cleanOuts.error < 0) ? 'CLEAN_OUTS_UNDER' : 'CLEAN_OUTS_OVER',
+      truth.seed,
+      {
+        given: cleanOuts.given === null ? '—' : cleanOuts.given,
+        truth: round(truth.cleanOuts.total),
+        raw: truth.hitProbability?.outs ?? 0,
+        bestGroup: best === undefined ? '—'
+          : `${best.count} to ${best.category.toLowerCase()} at ${round(best.winRate * 100, 0)}%`,
+        worstGroup: worst === undefined ? '—'
+          : `${worst.count} to ${worst.category.toLowerCase()} at ${round(worst.winRate * 100, 0)}%`,
+      },
+    ));
   }
 
   /* --- hit probability --------------------------------------------------- */
@@ -258,6 +284,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
 
   const passed = !input.timedOut
     && (outs === null || outs.correct)
+    && (cleanOuts === null || cleanOuts.correct)
     && (hitProbability === null || hitProbability.correct)
     && (equity === null || equity.correct)
     && (potOdds === null || potOdds.correct)
@@ -271,6 +298,7 @@ export function gradeHand(truth: HandTruth, input: HandInput): HandGrade {
   return {
     passed,
     outs,
+    cleanOuts,
     hitProbability,
     equity,
     potOdds,

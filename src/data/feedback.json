@@ -40,10 +40,6 @@
     "Every field right. {equity}% equity, and {action} is the play.",
     "All correct. {equity}% equity, {action} is the play."
   ],
-  "OUTS_DISCOUNTED": [
-    "You counted {given} and marked {difference} as soft. The raw count is {truth}. Discounting is the right instinct, but this field grades the mechanical count \u2014 carry the discount into your equity answer instead, and check below whether your equity landed where the discount implied.",
-    "{given} counted, {difference} discounted as soft, raw count {truth}. Sound thinking in the wrong field: count every improving card here, then let the equity estimate carry the judgement."
-  ],
   "OUTS_MISCOUNT": [
     "You counted {given}; there are {truth}. That is {difference} too many. The full list is below \u2014 a card only counts if it improves YOUR hand beyond what it gives everyone.",
     "{given} is {difference} over the actual {truth}. Compare against the list below: an improvement the whole table shares is not your out."
@@ -51,5 +47,13 @@
   "OUTS_UNDERCOUNT": [
     "You counted {given}; there are {truth}. You are {difference} short. The full list is below, grouped by what each card makes \u2014 the missing ones will be in whichever group you skipped.",
     "{given} against a raw count of {truth}. Every improving card is listed below by category; compare it against what you counted."
+  ],
+  "CLEAN_OUTS_UNDER": [
+    "You said {given} of your {raw} outs win; it is {truth}. You are discounting too hard \u2014 {bestGroup} is close to a full out each.",
+    "{given} against a measured {truth}. {bestGroup}, so those are worth nearly their face value."
+  ],
+  "CLEAN_OUTS_OVER": [
+    "You said {given} of your {raw} outs win; it is {truth}. Not every out is worth a whole out \u2014 {worstGroup} is the soft end.",
+    "{given} against a measured {truth}. {worstGroup}: those improve your hand into something that still loses most of the time."
   ]
 }

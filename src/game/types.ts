@@ -174,6 +174,32 @@ export interface BandGrade {
   readonly accepted: readonly EquityBandId[];
 }
 
+/**
+ * How many of hero's outs actually win, measured rather than judged.
+ *
+ * For each out the Monte Carlo reports `P(win | that card arrives)`. The
+ * clean-out equivalent is the sum of those probabilities: four straight outs
+ * winning 96% of the time they land are worth 3.85 outs; six cards that pair a
+ * weak kicker and win 48% of the time are worth 2.89.
+ *
+ * This replaced an "I discounted soft outs" checkbox, which changed only the
+ * wording of the feedback and left the judgement itself ungraded.
+ */
+export interface OutGroupTruth {
+  readonly category: HandCategory;
+  readonly count: number;
+  /** Mean `P(win | it arrives)` across the group. */
+  readonly winRate: number;
+  /** `count x winRate` — what the group is worth in clean outs. */
+  readonly cleanEquivalent: number;
+}
+
+export interface CleanOutsTruth {
+  /** Sum of `P(win | it arrives)` over every out. */
+  readonly total: number;
+  readonly groups: readonly OutGroupTruth[];
+}
+
 export interface EquityTruth {
   /** Hero's equity percentage against the narrowed opponent range(s). */
   readonly percent: number;
@@ -232,6 +258,8 @@ export interface HandTruth {
   readonly seats: readonly Seat[];
   readonly heroSeatIndex: number;
   readonly hitProbability: HitProbabilityTruth | null;
+  /** How many of those outs actually win. Present whenever outs are. */
+  readonly cleanOuts: CleanOutsTruth | null;
   /**
    * Whether hero was asked to count the outs themselves. A flow flag rather
    * than a fact about the hand, kept here so `gradeHand(truth, input)` stays a
@@ -251,20 +279,16 @@ export interface HandTruth {
 /** Per-field time spent, in milliseconds. */
 export type FieldTimings = Partial<Record<InputField, number>>;
 
-export const INPUT_FIELDS = ['outs', 'hitProbability', 'equity', 'potOdds', 'action'] as const;
+export const INPUT_FIELDS = [
+  'outs', 'cleanOuts', 'hitProbability', 'equity', 'potOdds', 'action',
+] as const;
 export type InputField = (typeof INPUT_FIELDS)[number];
 
 export interface HandInput {
   /** Hero's out count. Null when not asked. */
   readonly outs: number | null;
-  /**
-   * Hero ticked "I discounted soft outs".
-   *
-   * Only hero knows whether a low count was a deliberate discount or a
-   * miscount, and they are opposite lessons from the same number. Without this
-   * the feedback has to guess, so it asks instead.
-   */
-  readonly discountedSoftOuts: boolean;
+  /** How many of those hero thinks actually win. Null when not asked. */
+  readonly cleanOuts: number | null;
   /** How long each field took. Recorded for the post-hand breakdown. */
   readonly timings: FieldTimings;
   /** Hero's hit-probability estimate, percent. Null when not asked. */
@@ -284,6 +308,7 @@ export const MISTAKE_CATEGORIES = [
   'POT_ODDS_ARITHMETIC',
   'HIT_PROBABILITY',
   'OUTS_MISCOUNT',
+  'CLEAN_OUTS',
   'ACTION_TOO_PASSIVE',
   'ACTION_TOO_AGGRESSIVE',
   'ACTION_SHOULD_FOLD',
@@ -314,6 +339,7 @@ export interface ActionGrade {
 export interface HandGrade {
   readonly passed: boolean;
   readonly outs: FieldGrade | null;
+  readonly cleanOuts: FieldGrade | null;
   readonly hitProbability: FieldGrade | null;
   readonly equity: BandGrade | null;
   readonly potOdds: FieldGrade | null;
@@ -341,15 +367,17 @@ export const EQUITY_TOLERANCE = 5;
 /** Pot odds is arithmetic, not estimation, so it is graded tighter. */
 export const POT_ODDS_TOLERANCE = 2;
 /**
- * Outs are counted, not estimated, so the count must be exactly right.
- *
- * Hero may deliberately enter FEWER outs than this, having discounted soft ones
- * — outs that improve the hand to something that still loses. That is a real
- * and taught technique, but it belongs in the equity estimate, not here: this
- * field grades the mechanical count. Feedback says so explicitly when hero
- * undercounts.
+ * Outs are counted, not estimated, so the count must be exactly right. The
+ * judgement about which of them are worth having is graded separately, by
+ * `CLEAN_OUTS_TOLERANCE`.
  */
 export const OUTS_TOLERANCE = 0;
+
+/**
+ * Clean outs are a judgement about which outs are worth counting, so unlike the
+ * raw count they are not graded exactly.
+ */
+export const CLEAN_OUTS_TOLERANCE = 2;
 
 /**
  * Hit probability is graded against the exact probability alone, within this

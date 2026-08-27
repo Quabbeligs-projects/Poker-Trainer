@@ -44,6 +44,26 @@ export const MAX_ITERATIONS = 1_000_000;
 /** Auto-raise iterations while the standard error exceeds this, in percentage points. */
 export const DEFAULT_TARGET_STANDARD_ERROR = 0.5;
 
+/**
+ * How often hero wins when a particular card arrives.
+ *
+ * Measured, not assumed. The Monte Carlo already deals every runout, so the
+ * only cost is checking each dealt card against a lookup and accumulating
+ * hero's score — no extra simulation is needed.
+ *
+ * This is what separates a clean out from a soft one as a NUMBER rather than a
+ * rule of thumb: a straight card that wins 94% of the time it lands is worth
+ * nearly a whole out; a card that pairs bottom pair and wins 19% of the time is
+ * worth about a fifth of one.
+ */
+export interface OutOutcome {
+  readonly code: CardCode;
+  /** Runouts in which this card appeared. */
+  readonly hits: number;
+  /** Hero's mean score in those runouts: P(win | this card arrives). */
+  readonly winRate: number;
+}
+
 export interface EquityOptions {
   /** Hero's two hole cards. */
   readonly hole: readonly CardCode[];
@@ -59,6 +79,11 @@ export interface EquityOptions {
   readonly targetStandardError?: number;
   /** Ceiling on total iterations after auto-raising. Defaults to 1,000,000. */
   readonly maxIterations?: number;
+  /**
+   * Cards to measure `P(win | card arrives)` for, normally hero's outs.
+   * Costs one array lookup per dealt board card per iteration.
+   */
+  readonly trackOuts?: readonly CardCode[];
 }
 
 /**
@@ -119,6 +144,8 @@ export interface EquityResult {
    * can change.
    */
   readonly breakdown: EquityBreakdown | null;
+  /** Per-card win rates for the cards named in `trackOuts`. */
+  readonly outOutcomes: readonly OutOutcome[] | null;
 }
 
 /** Running totals, so an auto-raised run can extend rather than restart. */
@@ -140,6 +167,10 @@ interface Accumulator {
   /** Equity and frequency per finishing category. */
   categoryScore: Float64Array;
   categoryCount: Float64Array;
+  /** -1 when a card is not tracked, otherwise its slot in the arrays below. */
+  outSlotByCard: Int32Array | null;
+  outHits: Float64Array | null;
+  outScore: Float64Array | null;
 }
 
 function standardErrorOf(acc: Accumulator): number {
@@ -228,7 +259,19 @@ export function computeEquity(options: EquityOptions): EquityResult {
     improvedCount: 0,
     categoryScore: new Float64Array(HAND_CATEGORIES.length),
     categoryCount: new Float64Array(HAND_CATEGORIES.length),
+    outSlotByCard: null,
+    outHits: null,
+    outScore: null,
   };
+
+  const tracked = options.trackOuts ?? [];
+  if (tracked.length > 0) {
+    const slots = new Int32Array(DECK_SIZE).fill(-1);
+    tracked.forEach((code, slot) => { slots[code] = slot; });
+    acc.outSlotByCard = slots;
+    acc.outHits = new Float64Array(tracked.length);
+    acc.outScore = new Float64Array(tracked.length);
+  }
 
   const started = Date.now();
   runIterations(acc, iterations, hole, board, samplers, rng);
@@ -290,6 +333,15 @@ export function computeEquity(options: EquityOptions): EquityResult {
     hitIterationCeiling,
     elapsedMs,
     breakdown,
+    outOutcomes: acc.outHits === null ? null : tracked.map((code, slot) => {
+      const hits = (acc.outHits as Float64Array)[slot] as number;
+      return {
+        code,
+        hits,
+        // With no hits the rate is undefined; report 0 rather than NaN.
+        winRate: hits === 0 ? 0 : ((acc.outScore as Float64Array)[slot] as number) / hits,
+      };
+    }),
   };
 }
 
@@ -423,6 +475,20 @@ function runIterations(
         acc.improvedCount += 1;
       } else {
         acc.asIsScore += score;
+      }
+    }
+
+    // Attribute the result to any tracked out that arrived. Only the cards
+    // dealt this iteration can be outs; the visible board is fixed.
+    if (acc.outSlotByCard !== null) {
+      for (let i = 0; i < boardToDeal; i++) {
+        const slot = acc.outSlotByCard[fullBoard[board.length + i] as number] as number;
+        if (slot >= 0) {
+          const hits = acc.outHits as Float64Array;
+          const scores = acc.outScore as Float64Array;
+          hits[slot] = (hits[slot] as number) + 1;
+          scores[slot] = (scores[slot] as number) + score;
+        }
       }
     }
 

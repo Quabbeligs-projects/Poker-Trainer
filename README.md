@@ -32,7 +32,7 @@ Worker as a drop-in change if Monte Carlo ever blocks the UI on an iPhone.
 ## Commands
 
 ```
-npm test            # 302 tests, ~25s
+npm test            # 307 tests, ~30s
 npm run grids       # render every chart as a 13x13 grid -> range-grids.html
 npm run sanity      # solver verdicts on spots with uncontroversial answers
 npm run calibrate   # engine equity vs the rule of 4 and 2, across 600 spots
@@ -408,15 +408,32 @@ inputs, and that repeated grading returns identical verdicts.
 
 ### Grading tolerances
 
-Outs mode asks four things, each isolating one skill, then the action:
+Outs mode asks five things, each isolating one skill, then the action:
 
 | field | graded | skill |
 |---|---|---|
 | outs | exact | mechanical counting |
-| hit probability | ±3pp of the exact value | arithmetic |
+| outs that win | ±2 | which outs are worth having |
+| hit probability | ±3pp of the exact value | arithmetic, from the RAW count |
 | where you stand | correct band | judgement against a range |
 | pot odds | ±2pp | arithmetic, not estimation |
 | action | in the solver's accepted set | multiple actions can be right |
+
+**Clean outs are measured, not judged.** For every out the Monte Carlo reports
+`P(win | that card arrives)`, and the clean-out equivalent is the sum of those
+probabilities. On `6d3h` / `Kc 7s 4d` that is four straight outs winning 96% of
+the time they land plus six weak-pair outs winning 48%, so ten raw outs are
+worth 6.7. It costs nothing extra: the run already deals every runout, so the
+only work is checking each dealt card against a lookup.
+
+The per-group rates appear in the feedback — "9 to two pair — wins 73% when it
+comes, worth 6.6" — which is the clean/soft distinction as a measured number
+rather than a rule of thumb.
+
+This replaced an "I discounted soft outs" checkbox. The checkbox only changed
+the wording of the feedback: the raw count was still graded exactly, hit
+probability still derived from the raw count, and the equity band is far too
+coarse to reflect a discount, so the judgement itself was never tested.
 
 **Equity is a band, not a number.** A numeric equity input asks for something no
 human can compute at a table: 64.5% against a 445-combo range is a Monte Carlo
@@ -522,10 +539,6 @@ opponent's narrowed range as a 13×13 grid.
 Fields are asked **one at a time** rather than as a form. It keeps the number
 pad in one place on a phone, stops a later answer being revised after seeing an
 earlier one, and makes the per-field timing exact rather than inferred.
-
-**Soft outs are asked about, not guessed.** Entering 11 against a raw count of
-14 could be a deliberate discount or a miscount, and those are opposite lessons
-from the same number. A checkbox next to the field decides which feedback fires.
 
 **Per-field timings** appear on the feedback screen, so the time-trial range can
 be set from evidence now that there are five fields rather than three.

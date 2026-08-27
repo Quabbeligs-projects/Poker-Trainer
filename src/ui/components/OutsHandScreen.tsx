@@ -40,12 +40,22 @@ function stepsFor(truth: HandTruth): Step[] {
       suffix: '',
     });
   }
+  if (truth.asksForOuts && truth.cleanOuts !== null) {
+    steps.push({
+      field: 'cleanOuts',
+      question: 'How many of those actually win?',
+      hint: 'Not every out is worth a whole out. A card that improves you into a '
+        + 'hand that still loses counts for less.',
+      suffix: '',
+    });
+  }
   if (truth.hitProbability !== null) {
     steps.push({
       field: 'hitProbability',
       question: `Chance of hitting, with ${truth.hitProbability.cardsToCome} card${
         truth.hitProbability.cardsToCome === 1 ? '' : 's'} to come?`,
-      hint: 'Rule of 4 and 2, minus the excess over eight outs on the flop.',
+      hint: 'From your RAW count, not the clean one. Rule of 4 and 2, minus the '
+        + 'excess over eight outs on the flop.',
       suffix: '%',
     });
   }
@@ -87,7 +97,6 @@ export function OutsHandScreen({ truth, onSubmit }: {
   const [values, setValues] = useState<Partial<Record<InputField, number>>>({});
   const [action, setAction] = useState<ActionKind | null>(null);
   const [band, setBand] = useState<EquityBandId | null>(null);
-  const [discounted, setDiscounted] = useState(false);
   const [draft, setDraft] = useState('');
   const timings = useRef<FieldTimings>({});
   const stepStarted = useRef<number>(Date.now());
@@ -115,7 +124,7 @@ export function OutsHandScreen({ truth, onSubmit }: {
     }
     onSubmit({
       outs: collected.outs ?? null,
-      discountedSoftOuts: discounted,
+      cleanOuts: collected.cleanOuts ?? null,
       timings: timings.current,
       hitProbability: collected.hitProbability ?? null,
       equityBand: judged,
@@ -123,7 +132,7 @@ export function OutsHandScreen({ truth, onSubmit }: {
       action: chosen,
       timedOut: false,
     }, truth);
-  }, [stepIndex, steps.length, onSubmit, discounted, truth]);
+  }, [stepIndex, steps.length, onSubmit, truth]);
 
   const submitNumber = useCallback(() => {
     const parsed = Number.parseInt(draft, 10);
@@ -223,20 +232,6 @@ export function OutsHandScreen({ truth, onSubmit }: {
               />
               {step.suffix !== '' && <span className="suffix">{step.suffix}</span>}
             </div>
-
-            {step.field === 'outs' && (
-              // Only hero knows whether a low count was a deliberate discount
-              // or a miscount, and they are opposite lessons from the same
-              // number. Asking is the only honest way to tell them apart.
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={discounted}
-                  onChange={(event) => setDiscounted(event.target.checked)}
-                />
-                <span>I discounted soft outs</span>
-              </label>
-            )}
 
             <button
               type="button"

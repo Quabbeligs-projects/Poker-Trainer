@@ -25,6 +25,7 @@ import { RangeGrid } from './RangeGrid';
 
 const FIELD_LABEL: Record<InputField, string> = {
   outs: 'Outs',
+  cleanOuts: 'Outs that win',
   hitProbability: 'Hit probability',
   equity: 'Where you stand',
   potOdds: 'Pot odds',
@@ -139,19 +140,34 @@ function OutsList({ truth, missedCount }: {
   }
   return (
     <section className="outs-list">
-      <h3>Your {hit.outs} outs</h3>
+      <h3>
+        Your {hit.outs} outs
+        {truth.cleanOuts !== null && (
+          <small> · worth {Math.round(truth.cleanOuts.total * 10) / 10} clean</small>
+        )}
+      </h3>
       <p className="hint">
         {missedCount
           ? 'Grouped by what each card makes. The count alone cannot say which '
             + 'ones you missed, so they are all here.'
           : 'Grouped by what each card makes.'}
       </p>
-      {[...groups.entries()].map(([category, cards]) => (
-        <div className="outs-group" key={category}>
-          <span className="outs-group-label">{cards.length} to {category.toLowerCase()}</span>
-          <CardRow cards={cards} size="small" />
-        </div>
-      ))}
+      {[...groups.entries()].map(([category, cards]) => {
+        // The measured win rate is the clean/soft distinction as a number.
+        const group = truth.cleanOuts?.groups.find((g) => g.category === category);
+        return (
+          <div className="outs-group" key={category}>
+            <span className="outs-group-label">
+              {cards.length} to {category.toLowerCase()}
+              {group !== undefined && (
+                <em> — wins {Math.round(group.winRate * 100)}% when it comes,
+                  worth {Math.round(group.cleanEquivalent * 10) / 10}</em>
+              )}
+            </span>
+            <CardRow cards={cards} size="small" />
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -168,8 +184,9 @@ function Timings({ timings }: { timings: Partial<Record<InputField, number>> }):
     <section className="timings">
       <h3>Time per field</h3>
       <p className="hint">
-        {(total / 1000).toFixed(1)}s total. The time trial was specced for three
-        fields and there are now five — this is where the seconds actually go.
+        {(total / 1000).toFixed(1)}s total across {entries.length} fields — this
+        is where the seconds actually go, and what the time-trial range should be
+        set from.
       </p>
       {entries.map(([field, ms]) => (
         <div className="timing-row" key={field}>
@@ -212,6 +229,9 @@ export function FeedbackScreen({ truth, grade, onNext, nextLabel }: {
         <h3>Your answers</h3>
         {grade.outs !== null && (
           <AnswerRow label={FIELD_LABEL.outs} grade={grade.outs} suffix="" />
+        )}
+        {grade.cleanOuts !== null && (
+          <AnswerRow label={FIELD_LABEL.cleanOuts} grade={grade.cleanOuts} suffix="" />
         )}
         {grade.hitProbability !== null && (
           <AnswerRow label={FIELD_LABEL.hitProbability} grade={grade.hitProbability} suffix="%" />

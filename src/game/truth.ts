@@ -16,7 +16,12 @@
  */
 
 import { cardFromCode, type CardCode, type Rng } from '../engine/deck';
-import { HAND_CATEGORIES, categoryOfStrength, evaluator } from '../engine/evaluator';
+import {
+  HAND_CATEGORIES,
+  type HandCategory,
+  categoryOfStrength,
+  evaluator,
+} from '../engine/evaluator';
 import { computeEquity, DEFAULT_ITERATIONS } from '../engine/equity';
 import { adjustedRuleOfThumb, countOuts, exactHitProbability } from '../engine/outs';
 import { potOdds } from '../engine/potOdds';
@@ -74,16 +79,41 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
     throw new Error('A decision point needs at least one live opponent');
   }
 
+  // Remove hero's cards and the board from every opponent range before anything
+  // touches them. `computeEquity` does this internally, but the fold split and
+  // the rendered range grid did not, so a caller supplying an unfiltered range
+  // got a "duplicate cards" error from deep inside the evaluator. Doing it once
+  // here means no downstream consumer has to remember.
+  const known: CardCode[] = [...heroCards, ...board];
+  const liveRanges = opponentRanges.map((range, index) => {
+    const live = range.removeCards(known);
+    if (live.isEmpty) {
+      throw new Error(
+        `Opponent ${index + 1}'s range (${range.label || 'unlabelled'}) has no combos `
+        + 'left once hero\'s cards and the board are removed.',
+      );
+    }
+    return live;
+  });
+
+  /* --- outs ------------------------------------------------------------- */
+  const outsCount = (board.length === 3 || board.length === 4)
+    ? countOuts(heroCards, board)
+    : null;
+
   /* --- equity ----------------------------------------------------------- */
+  // Tracking the outs costs one lookup per dealt card per iteration, so the
+  // per-out win rates come out of the run that was happening anyway.
   const equityResult = computeEquity({
-    hole: heroCards, board, opponents: opponentRanges, rng, iterations,
+    hole: heroCards, board, opponents: liveRanges, rng, iterations,
+    ...(outsCount === null ? {} : { trackOuts: outsCount.outs.map((out) => out.code) }),
   });
 
   /* --- equity against only the hands that continue ---------------------- */
   // Split each opponent at exactly the price the solver will use, so the two
   // cannot drift apart.
   const pricing = priceAction(pot, toCall);
-  const continuing = opponentRanges.map((range) => splitByFoldDecision(
+  const continuing = liveRanges.map((range) => splitByFoldDecision(
     range, board, pricing.villainMustCall, pricing.potVillainFaces,
   ).continuing);
   const everyoneCanContinue = continuing.every((range) => !range.isEmpty);
@@ -94,19 +124,45 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
     : equityResult.equity;
 
   /* --- hit probability -------------------------------------------------- */
-  const hitProbability = (board.length === 3 || board.length === 4)
-    ? (() => {
-        const outs = countOuts(heroCards, board);
-        const cardsToCome = board.length === 3 ? 2 : 1;
+  const hitProbability = outsCount === null ? null : (() => {
+    const cardsToCome = board.length === 3 ? 2 : 1;
+    return {
+      outs: outsCount.total,
+      outCards: outsCount.outs.map((out) => ({ card: out.card, to: out.to })),
+      exact: exactHitProbability(outsCount.total, cardsToCome, outsCount.unseen),
+      ruleOfThumb: adjustedRuleOfThumb(outsCount.total, cardsToCome),
+      cardsToCome,
+    };
+  })();
+
+  /* --- how many of those outs actually win ------------------------------ */
+  const cleanOuts = (outsCount === null || equityResult.outOutcomes === null)
+    ? null
+    : (() => {
+        const rateByCard = new Map(
+          equityResult.outOutcomes.map((outcome) => [outcome.code, outcome.winRate]),
+        );
+        const groups = new Map<string, { count: number; sum: number }>();
+        let total = 0;
+        for (const out of outsCount.outs) {
+          const rate = rateByCard.get(out.code) ?? 0;
+          total += rate;
+          const group = groups.get(out.to);
+          if (group) { group.count += 1; group.sum += rate; }
+          else groups.set(out.to, { count: 1, sum: rate });
+        }
         return {
-          outs: outs.total,
-          outCards: outs.outs.map((out) => ({ card: out.card, to: out.to })),
-          exact: exactHitProbability(outs.total, cardsToCome, outs.unseen),
-          ruleOfThumb: adjustedRuleOfThumb(outs.total, cardsToCome),
-          cardsToCome,
+          total,
+          groups: [...groups.entries()]
+            .map(([category, group]) => ({
+              category: category as HandCategory,
+              count: group.count,
+              winRate: group.sum / group.count,
+              cleanEquivalent: group.sum,
+            }))
+            .sort((a, b) => b.cleanEquivalent - a.cleanEquivalent),
         };
-      })()
-    : null;
+      })();
 
   /* --- pot odds --------------------------------------------------------- */
   const odds = potOdds(toCall, pot);
@@ -117,7 +173,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
     equityVsContinuing: vsContinuingPercent / 100,
     pot,
     toCall,
-    opponentRange: opponentRanges[0] as Range,
+    opponentRange: liveRanges[0] as Range,
     board,
   });
 
@@ -146,6 +202,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
     seats,
     heroSeatIndex,
     hitProbability,
+    cleanOuts,
     asksForOuts: asksForOuts && hitProbability !== null,
     equity: {
       percent: equityResult.equity,
@@ -167,7 +224,7 @@ export function buildTruth(inputs: TruthInputs): HandTruth {
       betSize: solution.betSize,
       foldEquity: solution.foldEquity,
     },
-    opponents: opponentRanges.map((range, index) => {
+    opponents: liveRanges.map((range, index) => {
       const seat = opponentSeats[index] as Seat;
       return {
         seatIndex: seat.seatIndex,

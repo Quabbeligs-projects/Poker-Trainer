@@ -34,8 +34,9 @@ const expect = {
   potOdds: String(Math.round(t.potOdds.percent)),
   action: t.action.best,
   band: EQUITY_BANDS.find((b) => b.id === bandOf(t.equity.percent)).label,
+  clean: String(Math.round(t.cleanOuts.total)),
 };
-console.log(`seed ${SEED}: outs ${expect.outs}, hit ${expect.hit}%, ${expect.band} (${expect.equity}%), potOdds ${expect.potOdds}%, best ${expect.action}`);
+console.log(`seed ${SEED}: outs ${expect.outs} (${expect.clean} clean), hit ${expect.hit}%, ${expect.band} (${expect.equity}%), potOdds ${expect.potOdds}%, best ${expect.action}`);
 
 const BASE = process.env.VITE_BASE ?? '/Poker-Trainer/';
 const TYPES={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.json':'application/json','.webmanifest':'application/manifest+json'};
@@ -64,7 +65,7 @@ await page.goto(`http://localhost:${PORT}${BASE}?seed=${SEED}`,{waitUntil:'netwo
 await page.waitForSelector('.ask h2',{timeout:30000});
 
 const answerStreet = async (exp) => {
-  for (const v of [exp.outs, exp.hit]) {
+  for (const v of [exp.outs, exp.clean, exp.hit]) {
     await page.waitForSelector('.number-field input',{timeout:15000});
     await page.locator('.number-field input').fill(v);
     await page.locator('button.primary').click();
