@@ -26,9 +26,16 @@ import {
   comboIndex,
   handKeyOfCombo,
   openerBucket,
+  type SeatPosition,
   seatPositions,
 } from '../engine/ranges';
-import { tableAdjustedResponse, tableAdjustedRfi } from '../engine/tableScaling';
+import {
+  handOrdering,
+  scaleRangeWidth,
+  tableAdjustedResponse,
+  tableAdjustedRfi,
+  tableSeats,
+} from '../engine/tableScaling';
 import { gradeHand } from './grading';
 import {
   buildOutsSpot,
@@ -236,6 +243,10 @@ export interface PreflopTruth {
   readonly facing: FacingAction;
   /** Seat that opened, when there is one. */
   readonly openerSeatIndex: number | null;
+  /** Seat that called the open, for `openWithCallers`. */
+  readonly callerSeatIndex: number | null;
+  /** True when hero opened the pot and is now facing a re-raise. */
+  readonly heroOpened: boolean;
   readonly accepted: readonly ActionKind[];
   readonly best: ActionKind;
   readonly firedRules: readonly string[];
@@ -273,9 +284,25 @@ export function solvePreflop(
   rules: string[];
   ranges: PreflopRangeView[];
 } {
+  const consulted = consultedRanges(charts, settings, heroSeatIndex, facing, openerChart);
+
+  // A verdict with no chart behind it is a verdict with no basis. Every branch
+  // below falls through to "fold" when the hand is in none of the consulted
+  // ranges, so an empty chart set does not fail loudly on its own — it silently
+  // folds everything, aces included. Refuse instead. legalFacings() keeps spot
+  // generation from ever reaching this, and a test sweeps every seat to prove
+  // it; this is the backstop that makes a gap impossible to ship quietly.
+  if (!consulted.some((entry) => !entry.range.isEmpty)) {
+    throw new Error(
+      `No chart covers ${facing} for a ${(seatPositions(settings.playerCount)[heroSeatIndex] as { chart: ChartPosition }).chart} `
+      + `seat at a ${settings.playerCount}-handed table (consulted: `
+      + `${consulted.map((entry) => entry.range.label).join(', ') || 'nothing'}). `
+      + 'This spot must not be generated.',
+    );
+  }
+
   const inRange = (range: Range): boolean =>
     range.weightOfCards(heroCards[0] as CardCode, heroCards[1] as CardCode) > 0;
-  const rules: string[] = [];
   const view = (action: ActionKind, range: Range): PreflopRangeView => ({
     action,
     label: range.label,
@@ -284,55 +311,96 @@ export function solvePreflop(
       .map(([key, value]) => [key, value.weight / value.combos] as const),
   });
 
+  const rules: string[] = [];
+  const ranges = consulted.map((entry) => view(entry.action, entry.range));
+
   if (facing === 'foldedToHero') {
-    const rfi = tableAdjustedRfi(charts, settings.playerCount, heroSeatIndex);
+    const rfi = (consulted[0] as ConsultedRange).range;
     if (inRange(rfi)) {
       rules.push(`hand is in the ${rfi.label} opening range (${rfi.percentOfHands.toFixed(1)}%) → raise`);
-      return { accepted: ['raise'], best: 'raise', rules, ranges: [view('raise', rfi)] };
+      return { accepted: ['raise'], best: 'raise', rules, ranges };
     }
     rules.push(`hand is outside the ${rfi.label} opening range → fold`);
-    return { accepted: ['fold'], best: 'fold', rules, ranges: [view('raise', rfi)] };
+    return { accepted: ['fold'], best: 'fold', rules, ranges };
+  }
+
+  const accepted: ActionKind[] = [];
+  for (const entry of consulted) {
+    if (entry.range.isEmpty || !inRange(entry.range)) continue;
+    accepted.push(entry.action);
+    rules.push(
+      `hand is in the ${entry.range.label} range (${entry.range.percentOfHands.toFixed(1)}%) → ${entry.action}`,
+    );
+  }
+  if (accepted.length === 0) {
+    rules.push(
+      facing === 'threeBet'
+        ? 'hand is in neither the 4-bet nor the calling range vs a 3-bet → fold'
+        : `hand is in neither the calling nor the raising range vs a ${openerBucket(openerChart as ChartPosition)} open → fold`,
+    );
+    return { accepted: ['fold'], best: 'fold', rules, ranges };
+  }
+  return { accepted, best: accepted[0] as ActionKind, rules, ranges };
+}
+
+interface ConsultedRange {
+  readonly action: ActionKind;
+  readonly range: Range;
+}
+
+/**
+ * Every chart `solvePreflop` will consult for this spot, in the order it
+ * consults them, most aggressive first.
+ *
+ * Spot generation and the solver both read this, so the two can never disagree
+ * about which charts back a verdict. When a seat/action pair has no chart, that
+ * shows up here as an empty range, `legalFacings` refuses to generate the spot,
+ * and `solvePreflop` throws rather than folding every hand by default.
+ */
+function consultedRanges(
+  charts: RangeCharts,
+  settings: Settings,
+  heroSeatIndex: number,
+  facing: FacingAction,
+  openerChart: ChartPosition | null,
+): ConsultedRange[] {
+  const heroChart = (seatPositions(settings.playerCount)[heroSeatIndex] as { chart: ChartPosition }).chart;
+
+  if (facing === 'foldedToHero') {
+    return [{
+      action: 'raise',
+      range: tableAdjustedRfi(charts, settings.playerCount, heroSeatIndex),
+    }];
   }
 
   if (openerChart === null) throw new Error(`Facing ${facing} needs an opener`);
 
   if (facing === 'threeBet') {
-    const response = charts.vsThreeBet(
-      (seatPositions(settings.playerCount)[heroSeatIndex] as { chart: ChartPosition }).chart,
-    );
-    const accepted: ActionKind[] = [];
-    if (inRange(response.fourBet)) { accepted.push('raise'); rules.push('hand is in the 4-bet range → raise'); }
-    if (inRange(response.call)) { accepted.push('call'); rules.push('hand is in the calling range vs a 3-bet → call'); }
-    const views = [view('raise', response.fourBet), view('call', response.call)];
-    if (accepted.length === 0) {
-      rules.push('hand is in neither the 4-bet nor the calling range vs a 3-bet → fold');
-      return { accepted: ['fold'], best: 'fold', rules, ranges: views };
-    }
-    return { accepted, best: accepted[0] as ActionKind, rules, ranges: views };
+    const response = charts.vsThreeBet(heroChart);
+    return [
+      { action: 'raise', range: response.fourBet },
+      { action: 'call', range: response.call },
+    ];
   }
 
-  const response = facing === 'openWithCallers'
-    ? charts.vsOpenWithCallers(
-        (seatPositions(settings.playerCount)[heroSeatIndex] as { chart: ChartPosition }).chart,
-      )
-    : tableAdjustedResponse(charts, settings.playerCount, heroSeatIndex, openerChart);
+  if (facing === 'openWithCallers') {
+    // Multiway charts are position-specific and are not part of the vsOpen
+    // set, so they are looked up separately — but they get the same width
+    // scaling as every other range, which the first version skipped.
+    const seat = tableSeats(settings.playerCount)[heroSeatIndex] as { widthFactor: number };
+    const base = charts.vsOpenWithCallers(heroChart);
+    const ordering = handOrdering(charts);
+    return [
+      { action: 'raise', range: scaleRangeWidth(base.squeeze, seat.widthFactor, ordering) },
+      { action: 'call', range: scaleRangeWidth(base.call, seat.widthFactor, ordering) },
+    ];
+  }
 
-  const raiseRange = facing === 'openWithCallers' ? response.squeeze : response.threeBet;
-  const accepted: ActionKind[] = [];
-  if (inRange(raiseRange)) {
-    accepted.push('raise');
-    rules.push(`hand is in the ${raiseRange.label} range (${raiseRange.percentOfHands.toFixed(1)}%) → raise`);
-  }
-  if (inRange(response.call)) {
-    accepted.push('call');
-    rules.push(`hand is in the ${response.call.label} range (${response.call.percentOfHands.toFixed(1)}%) → call`);
-  }
-  const views = [view('raise', raiseRange), view('call', response.call)];
-  if (accepted.length === 0) {
-    rules.push(`hand is in neither the calling nor the raising range vs a ${openerBucket(openerChart)} open → fold`);
-    return { accepted: ['fold'], best: 'fold', rules, ranges: views };
-  }
-  return { accepted, best: accepted[0] as ActionKind, rules, ranges: views };
+  const response = tableAdjustedResponse(charts, settings.playerCount, heroSeatIndex, openerChart);
+  return [
+    { action: 'raise', range: response.threeBet },
+    { action: 'call', range: response.call },
+  ];
 }
 
 export interface PreflopGrade {
@@ -342,6 +410,149 @@ export interface PreflopGrade {
   readonly accepted: readonly ActionKind[];
   readonly firedRules: readonly string[];
   readonly mistakes: readonly string[];
+}
+
+export interface LegalFacing {
+  readonly facing: FacingAction;
+  readonly openerSeatIndex: number | null;
+  /** The seat that called the open, for `openWithCallers`. */
+  readonly callerSeatIndex: number | null;
+  /** True when hero opened the pot and is now facing a re-raise. */
+  readonly heroOpened: boolean;
+}
+
+/**
+ * Every preflop spot that can actually be dealt to this seat.
+ *
+ * Picking a facing action first and hoping the rest of the system could express
+ * it is what produced two broken spot types: a big blind "folded to hero" that
+ * no chart covers, and an "opened, with callers" whose table showed every seat
+ * between the opener and hero as folded. The rules are enumerated here instead,
+ * and every one of them is a fact about poker rather than a tuning knob:
+ *
+ *   - folded to hero — needs a seat that can be first in voluntarily. Folded to
+ *     the BIG BLIND is not a spot at all: the blind is already posted, everyone
+ *     has folded, and the hand is over without the big blind acting. So the big
+ *     blind is excluded, which is also why no BB opening chart exists to grade
+ *     it against.
+ *   - facing an open — needs one earlier seat to be the opener. The big blind
+ *     cannot be that seat: it acts last preflop, so it never opens.
+ *   - opened, with callers — needs an opener AND at least one seat strictly
+ *     between the opener and hero to be the caller. Without one there is nobody
+ *     who could have called, and the squeeze chart is being applied to dead
+ *     money that does not exist.
+ *   - facing a 3-bet — hero opened and a LATER seat re-raised, so action came
+ *     back around. The 3-bettor must therefore sit AFTER hero, not before, and
+ *     hero must be able to open in the first place (so, not the big blind).
+ *
+ * A spot also has to have a chart behind it. That is checked against the same
+ * lookup the solver uses rather than restated here, so the two cannot drift:
+ * the multiway charts have no UTG entry, because at six-handed and smaller UTG
+ * never faces an open at all. At eight-handed and larger several seats share
+ * the UTG chart, so a later UTG seat CAN face an open with callers — a real
+ * spot with no chart for it. Rather than grade it against a neighbouring
+ * position's squeeze range, which would be inventing poker, it is not dealt.
+ */
+export function legalFacings(
+  charts: RangeCharts,
+  settings: Settings,
+  positions: readonly SeatPosition[],
+  heroSeatIndex: number,
+): LegalFacing[] {
+  const hero = positions[heroSeatIndex];
+  if (hero === undefined) throw new Error(`Invalid hero seat ${heroSeatIndex}`);
+
+  const canOpen = (seat: SeatPosition): boolean => seat.chart !== 'BB';
+  const earlier = positions.filter((seat) => seat.seatIndex < heroSeatIndex && canOpen(seat));
+  const later = positions.filter((seat) => seat.seatIndex > heroSeatIndex);
+
+  const candidates: LegalFacing[] = [];
+
+  if (canOpen(hero)) {
+    candidates.push({
+      facing: 'foldedToHero', openerSeatIndex: null, callerSeatIndex: null, heroOpened: false,
+    });
+  }
+
+  for (const opener of earlier) {
+    candidates.push({
+      facing: 'open', openerSeatIndex: opener.seatIndex, callerSeatIndex: null, heroOpened: false,
+    });
+    for (const caller of positions) {
+      if (caller.seatIndex <= opener.seatIndex || caller.seatIndex >= heroSeatIndex) continue;
+      candidates.push({
+        facing: 'openWithCallers',
+        openerSeatIndex: opener.seatIndex,
+        callerSeatIndex: caller.seatIndex,
+        heroOpened: false,
+      });
+    }
+  }
+
+  if (canOpen(hero)) {
+    for (const threeBettor of later) {
+      candidates.push({
+        facing: 'threeBet',
+        openerSeatIndex: threeBettor.seatIndex,
+        callerSeatIndex: null,
+        heroOpened: true,
+      });
+    }
+  }
+
+  return candidates.filter((candidate) => {
+    const openerChart = candidate.openerSeatIndex === null
+      ? null
+      : (positions[candidate.openerSeatIndex] as SeatPosition).chart;
+    return consultedRanges(charts, settings, heroSeatIndex, candidate.facing, openerChart)
+      .some((entry) => !entry.range.isEmpty);
+  });
+}
+
+/**
+ * How often each facing action comes up in the drill.
+ *
+ * [JUDGEMENT] These are drill weights, not observed frequencies. Picking
+ * uniformly over the legal spots would weight by how many seats can hold each
+ * role, which is not the same thing: at nine-handed an early seat has seven
+ * players behind it and therefore seven distinct "facing a 3-bet" spots against
+ * one "folded to hero", so a uniform draw served 3-bet spots a third of the
+ * time. Facing an open is the most common real decision and gets the most
+ * weight; the rest are levelled so the rarer branches still come up often
+ * enough to practise.
+ */
+const FACING_WEIGHTS: Readonly<Record<FacingAction, number>> = {
+  foldedToHero: 1,
+  open: 2,
+  openWithCallers: 1,
+  threeBet: 1,
+};
+
+/**
+ * Picks a facing action by weight, then a spot uniformly within it.
+ *
+ * Two stages rather than one weighted draw over all candidates, so the mix of
+ * facing actions does not drift with table size.
+ */
+function pickFacing(legal: readonly LegalFacing[], rng: Rng): LegalFacing {
+  const byFacing = new Map<FacingAction, LegalFacing[]>();
+  for (const candidate of legal) {
+    const bucket = byFacing.get(candidate.facing);
+    if (bucket === undefined) byFacing.set(candidate.facing, [candidate]);
+    else bucket.push(candidate);
+  }
+  const available = [...byFacing.keys()];
+  const total = available.reduce((sum, facing) => sum + FACING_WEIGHTS[facing], 0);
+  let roll = rng.next() * total;
+  for (const facing of available) {
+    roll -= FACING_WEIGHTS[facing];
+    if (roll <= 0) {
+      const bucket = byFacing.get(facing) as LegalFacing[];
+      return bucket[rng.nextInt(bucket.length)] as LegalFacing;
+    }
+  }
+  const last = byFacing.get(available[available.length - 1] as FacingAction) as LegalFacing[];
+  return last[rng.nextInt(last.length)] as LegalFacing;
 }
 
 /** Builds one Preflop-mode hand and freezes its truth. */
@@ -360,34 +571,47 @@ export function buildPreflopHand(
 
   const heroCards = shuffledDeckCodes(rng).slice(0, 2);
 
-  // Which facing actions are possible depends on whether anyone acts before hero.
-  const earlier = positions.filter(
-    (seat) => seat.seatIndex < heroSeatIndex && seat.chart !== 'BB',
-  );
-  const options: FacingAction[] = earlier.length === 0
-    ? ['foldedToHero']
-    : ['foldedToHero', 'open', 'open', 'openWithCallers', 'threeBet'];
-  const facing = options[rng.nextInt(options.length)] as FacingAction;
-
-  const opener = facing === 'foldedToHero' || earlier.length === 0
-    ? null
-    : earlier[rng.nextInt(earlier.length)];
+  // Which facing actions are possible depends on the seat. Picking one and
+  // hoping the rest of the system can express it is what produced a big blind
+  // "folded to hero" spot that had no chart behind it and graded AA as a fold.
+  // The legal set is enumerated instead, and generation throws if it is empty.
+  const legal = legalFacings(charts, settings, positions, heroSeatIndex);
+  if (legal.length === 0) {
+    throw new Error(
+      `No preflop spot can be dealt to seat ${heroSeatIndex} `
+      + `(${heroPosition.chart}) at a ${settings.playerCount}-handed table.`,
+    );
+  }
+  const spot = pickFacing(legal, rng);
+  const facing = spot.facing;
+  const opener = spot.openerSeatIndex === null ? null : positions[spot.openerSeatIndex] ?? null;
 
   const solved = solvePreflop(
     charts, settings, heroSeatIndex, heroCards, facing,
-    opener === undefined || opener === null ? null : opener.chart,
+    opener === null ? null : opener.chart,
   );
 
+  // The table has to show the story the facing action claims. Facing a 3-bet
+  // means hero opened and someone BEHIND re-raised, so hero's own raise appears
+  // and everyone in front has folded; "opened, with callers" means a named seat
+  // actually called rather than every seat between the opener and hero folding.
   const seats: Seat[] = positions.map((seat) => {
     const isHero = seat.seatIndex === heroSeatIndex;
+    const isOpener = opener !== null && seat.seatIndex === opener.seatIndex;
+    const isCaller = spot.callerSeatIndex !== null && seat.seatIndex === spot.callerSeatIndex;
     const actions = [];
     if (isHero) {
+      if (spot.heroOpened) {
+        actions.push({ street: 'preflop' as Street, description: `raised to ${BIG_BLIND * 3}` });
+      }
       actions.push({ street: 'preflop' as Street, description: 'to act' });
-    } else if (opener !== null && opener !== undefined && seat.seatIndex === opener.seatIndex) {
+    } else if (isOpener) {
       actions.push({
         street: 'preflop' as Street,
         description: facing === 'threeBet' ? `3-bet to ${BIG_BLIND * 9}` : `raised to ${BIG_BLIND * 3}`,
       });
+    } else if (isCaller) {
+      actions.push({ street: 'preflop' as Street, description: `called ${BIG_BLIND * 3}` });
     } else if (seat.seatIndex < heroSeatIndex) {
       actions.push({ street: 'preflop' as Street, description: 'folded' });
     }
@@ -396,8 +620,7 @@ export function buildPreflopHand(
       display: seat.display,
       chart: seat.chart,
       isHero,
-      hasFolded: !isHero && seat.seatIndex < heroSeatIndex
-        && !(opener !== null && opener !== undefined && seat.seatIndex === opener.seatIndex),
+      hasFolded: !isHero && !isOpener && !isCaller && seat.seatIndex < heroSeatIndex,
       actions,
     };
   });
@@ -411,7 +634,9 @@ export function buildPreflopHand(
     heroSeatIndex,
     seats,
     facing,
-    openerSeatIndex: opener === null || opener === undefined ? null : opener.seatIndex,
+    openerSeatIndex: opener === null ? null : opener.seatIndex,
+    callerSeatIndex: spot.callerSeatIndex,
+    heroOpened: spot.heroOpened,
     accepted: solved.accepted,
     best: solved.best,
     firedRules: solved.rules,

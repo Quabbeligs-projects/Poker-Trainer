@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import rangesJson from '../src/data/ranges.json';
 import { RangeCharts, type RangeChartsJson } from '../src/engine/ranges';
-import { codesFromStrings, createRng } from '../src/engine/deck';
+import { codeFromString, codesFromStrings, createRng } from '../src/engine/deck';
 import { buildTruth } from '../src/game/truth';
 import { classifyCombo } from '../src/engine/rangeNarrowing';
-import { OutsHand, buildPreflopHand, gradePreflop, solvePreflop } from '../src/game/session';
-import { seatPositions } from '../src/engine/ranges';
+import {
+  OutsHand, buildPreflopHand, gradePreflop, legalFacings, solvePreflop,
+} from '../src/game/session';
+import { type ChartPosition, seatPositions } from '../src/engine/ranges';
 import { gradeHand } from '../src/game/grading';
 import {
   buildOutsSpot,
@@ -25,6 +27,7 @@ import {
   HIT_PROBABILITY_TOLERANCE,
   POT_ODDS_TOLERANCE,
   type HandInput,
+  type Seat,
   type Settings,
   timeTrialChoices,
 } from '../src/game/types';
@@ -942,6 +945,118 @@ describe('settings', () => {
           `${players}-handed: ${caller.display} cannot call a raise from ` +
           `${raiser.display}, who acts later`,
         ).toBeLessThan(caller.seatIndex);
+      }
+    }
+  });
+
+  it('gives every generated preflop spot a chart to grade against', () => {
+    // The Outs-mode sweep above asserts one raiser acting before the caller.
+    // It passed while Preflop mode was dealing a "folded to the big blind"
+    // spot, which no chart covers: rfi has no BB entry, because the big blind
+    // never opens first in. Every hand fell outside an empty range, so the
+    // solver graded FOLD as the only correct answer — for aces included.
+    //
+    // A verdict with no chart behind it is a verdict with no basis, so this
+    // asserts coverage over the whole space rather than over sampled seeds.
+    for (let players = 2; players <= 10; players++) {
+      const positions = seatPositions(players);
+      const settingsAt = { ...settings, playerCount: players, fixedSeatIndex: null };
+      for (const seat of positions) {
+        const legal = legalFacings(charts, settingsAt, positions, seat.seatIndex);
+        expect(
+          legal.length,
+          `${players}-handed seat ${seat.seatIndex} (${seat.chart}) has no dealable spot`,
+        ).toBeGreaterThan(0);
+
+        for (const spot of legal) {
+          const openerChart = spot.openerSeatIndex === null
+            ? null
+            : (positions[spot.openerSeatIndex] as { chart: ChartPosition }).chart;
+          const solved = solvePreflop(
+            charts, settingsAt, seat.seatIndex,
+            [codeFromString('As'), codeFromString('Ah')],
+            spot.facing, openerChart,
+          );
+          const where = `${players}-handed ${seat.chart} facing ${spot.facing}`;
+          expect(
+            solved.ranges.filter((r) => r.handKeyWeights.length > 0).length,
+            `${where}: no chart to grade against`,
+          ).toBeGreaterThan(0);
+          // Aces are never a fold anywhere preflop. This is the symptom the
+          // empty-chart bug produced, so it is asserted directly.
+          expect(solved.best, `${where}: aces graded as a fold`).not.toBe('fold');
+        }
+      }
+    }
+  });
+
+  it('refuses to solve a spot no chart covers', () => {
+    // The backstop behind legalFacings. Folded to the big blind is the spot
+    // that was shipping; asking for it directly must fail loudly rather than
+    // fold every hand.
+    const positions = seatPositions(6);
+    const bb = positions.findIndex((p) => p.chart === 'BB');
+    expect(() => solvePreflop(
+      charts, { ...settings, playerCount: 6, fixedSeatIndex: null }, bb,
+      [codeFromString('As'), codeFromString('Ah')], 'foldedToHero', null,
+    )).toThrow(/No chart covers/);
+  });
+
+  it('deals a preflop table that tells the same story as the facing action', () => {
+    // Same class as the empty-chart bug: a seat/action combination the builder
+    // produced that the rest of the system had no answer for. "Opened, with
+    // callers" showed every seat between the opener and hero as FOLDED, so no
+    // caller existed while hero was graded against a squeeze range. And facing
+    // a 3-bet put the 3-bettor BEFORE hero with hero's own raise missing, so
+    // the table showed a player 3-betting a pot nobody had opened.
+    for (let players = 2; players <= 10; players++) {
+      for (let i = 0; i < 60; i++) {
+        const truth = buildPreflopHand(
+          `story-${players}-${i}`,
+          { ...settings, playerCount: players, fixedSeatIndex: null },
+          charts,
+        );
+        const hero = truth.seats[truth.heroSeatIndex] as Seat;
+        const where = `${players}-handed ${truth.seed} (${truth.facing}, hero ${hero.display})`;
+        const described = (prefix: string) => truth.seats.filter(
+          (s) => s.actions.some((a: { description: string }) => a.description.startsWith(prefix)),
+        );
+
+        if (truth.facing === 'foldedToHero') {
+          expect(truth.openerSeatIndex, `${where}: folded to hero but someone opened`).toBeNull();
+          expect(hero.chart, `${where}: folded to the big blind ends the hand`).not.toBe('BB');
+          expect(described('raised'), `${where}: nobody should have raised`).toHaveLength(0);
+        }
+
+        if (truth.facing === 'openWithCallers') {
+          expect(truth.callerSeatIndex, `${where}: callers spot with no caller`).not.toBeNull();
+          const caller = truth.seats[truth.callerSeatIndex as number] as Seat;
+          expect(caller.hasFolded, `${where}: the caller is shown as folded`).toBe(false);
+          expect(
+            caller.seatIndex,
+            `${where}: the caller must sit between the opener and hero`,
+          ).toBeGreaterThan(truth.openerSeatIndex as number);
+          expect(caller.seatIndex).toBeLessThan(truth.heroSeatIndex);
+        }
+
+        if (truth.facing === 'threeBet') {
+          expect(truth.heroOpened, `${where}: facing a 3-bet without having opened`).toBe(true);
+          expect(
+            hero.actions.some((a) => a.description.startsWith('raised')),
+            `${where}: hero's own open is missing from the table`,
+          ).toBe(true);
+          expect(
+            truth.openerSeatIndex as number,
+            `${where}: the 3-bettor acts before hero, so there was nothing to 3-bet`,
+          ).toBeGreaterThan(truth.heroSeatIndex);
+        }
+
+        // Nobody who has money in the pot is also shown as folded.
+        for (const seat of truth.seats) {
+          if (seat.actions.some((a) => /^(raised|called|3-bet)/.test(a.description))) {
+            expect(seat.hasFolded, `${where}: ${seat.display} both acted and folded`).toBe(false);
+          }
+        }
       }
     }
   });

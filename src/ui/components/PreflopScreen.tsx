@@ -13,7 +13,7 @@ const FACING_TEXT: Record<FacingAction, string> = {
   foldedToHero: 'Folded to you',
   open: 'Opened in front of you',
   openWithCallers: 'Opened, with callers',
-  threeBet: 'Raised, then 3-bet',
+  threeBet: 'You raised, then got 3-bet',
 };
 
 export function PreflopScreen({ truth, secondsLeft, onAnswer }: {
@@ -22,9 +22,12 @@ export function PreflopScreen({ truth, secondsLeft, onAnswer }: {
   onAnswer: (action: ActionKind) => void;
 }): JSX.Element {
   const hero = truth.seats[truth.heroSeatIndex];
-  const opener = truth.openerSeatIndex === null
-    ? null
-    : truth.seats[truth.openerSeatIndex];
+  // Every seat with an action to its name, in seat order. The opener alone was
+  // not enough: an "opened, with callers" spot showed no caller anywhere, and a
+  // 3-bet spot did not show hero's own raise.
+  const acted = truth.seats.filter(
+    (seat) => !seat.isHero && seat.actions.some((a) => a.description !== 'folded'),
+  );
 
   return (
     <div className="hand">
@@ -50,14 +53,14 @@ export function PreflopScreen({ truth, secondsLeft, onAnswer }: {
           <span className="seat-name">{hero?.display} (you)</span>
           <span className="seat-actions">{FACING_TEXT[truth.facing]}</span>
         </li>
-        {opener !== null && opener !== undefined && (
-          <li>
-            <span className="seat-name">{opener.display}</span>
+        {acted.map((seat) => (
+          <li key={seat.seatIndex}>
+            <span className="seat-name">{seat.display}</span>
             <span className="seat-actions">
-              {opener.actions.map((a) => a.description).join(', ')}
+              {seat.actions.map((a) => a.description).join(', ')}
             </span>
           </li>
-        )}
+        ))}
       </ul>
 
       <section className="ask">

@@ -521,6 +521,47 @@ benchmark. On such a spot a correctly-applied `×2` can be graded wrong. Widenin
 the turn band to ±4pp would cover to 21 outs, ±5pp to 28. Left at ±3pp and handled by capping spot generation instead; the thresholds are
 asserted in `test/outs.test.ts` so any change to either rule shows up.
 
+### Which preflop spots exist
+
+A preflop verdict with no chart behind it is a verdict with no basis, so the
+spots that can be dealt are enumerated in `legalFacings` rather than picked and
+hoped for. Every rule there is a fact about poker, not a tuning knob:
+
+- **Folded to hero** needs a seat that can be first in voluntarily. Folded to
+  the **big blind** is not a spot at all — the blind is already posted, everyone
+  has folded, and the hand ends without the big blind acting. That is also why
+  no BB opening chart exists, and `rfi` has no `BB` key.
+- **Facing an open** needs an earlier seat as the opener. The big blind is never
+  that seat; it acts last preflop.
+- **Opened, with callers** needs an opener *and* at least one seat strictly
+  between the opener and hero to be the caller. Without one there is nobody who
+  could have called, and the squeeze range is being applied to dead money that
+  does not exist.
+- **Facing a 3-bet** means hero opened and a **later** seat re-raised, so action
+  came back around. The 3-bettor sits after hero, hero's own raise is on the
+  table, and everyone in front has folded.
+
+A spot must also have a chart. That is checked against the same lookup the
+solver uses — `consultedRanges`, which both `legalFacings` and `solvePreflop`
+read — so the generator and the solver cannot drift on which charts back a
+verdict. The multiway charts have no UTG entry, because at six-handed and
+smaller UTG never faces an open at all; at eight-handed and larger several seats
+share the UTG chart, so a later UTG seat *can* face an open with callers. That
+spot is real but uncharted, so it is not dealt. Grading it against a
+neighbouring position's squeeze range would be inventing poker.
+
+`solvePreflop` throws if every chart it consults is empty. Each branch falls
+through to "fold" when the hand is in none of the ranges, so an empty chart set
+does not fail on its own — it silently folds everything, aces included. That
+backstop turns a missing chart into a loud error instead of a wrong lesson.
+
+`FACING_WEIGHTS` decides how often each action comes up. **[JUDGEMENT]** These
+are drill weights, not observed frequencies. Drawing uniformly over legal spots
+would weight by how many seats can hold each role: at nine-handed an early seat
+has seven players behind it and so seven distinct "facing a 3-bet" spots against
+one "folded to hero", which served 3-bet spots a third of the time. Facing an
+open is the most common real decision and gets the most weight.
+
 ### Hand mix
 
 `HAND_MIX_WEIGHTS` in `spot.ts` leans the rotation toward draws (strongDraw 3.0
@@ -656,6 +697,11 @@ two CI failures came from assuming otherwise. What is deliberately not assumed:
   decides which hands survive table-size trimming, which changes opponent
   ranges, which changes graded truth, so it must not vary with the ICU data a
   Node build happens to ship. A test pins the sequence.
+- **No random spot in a screen check.** The smoke test used to deal a *random*
+  preflop hand, so when it hit the one uncharted spot it failed on CI while
+  passing locally on the same commit. It drives one pinned seed per facing
+  action now. Coverage of the whole seat/action space belongs in the unit
+  sweep, which is exhaustive; the browser check proves wiring.
 - **No wall-clock gate on correctness.** Timing assertions in the suite are
   generous 5s ceilings that catch an algorithmic regression, not a slow runner.
   Real numbers come from `npm run bench`, which CI runs with
